@@ -1,0 +1,29 @@
+{
+  "application": "Slarty GoFast",
+  "root_directory": "__DIR__",
+  "repository": {
+    "adapter": "Local",
+    "options": {
+      "root": "/tmp/artifact-repo"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "slarty-mac",
+      "directories": [
+        "src"
+      ],
+      "command": "make mac-binary",
+      "output_directory": "build/mac",
+      "deploy_location": "build/mac-deploy",
+      "artifact_prefix": "slarty-mac"
+    }
+  ],
+  "assets": [
+    {
+      "name": "Some Asset",
+      "filename": "smurpy.tar.gz",
+      "deploy_location": "build/assets/smurpy"
+    }
+  ]
+}
