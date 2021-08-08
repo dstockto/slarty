@@ -54,7 +54,12 @@ func runArtifactNames(cmd *cobra.Command, args []string) {
 	artifactNames := make(map[string]string)
 	var longestName int
 	var longestFilename int
-	for _, artifact := range artifactConfig.Artifacts {
+
+	filters := strings.Split(filter, ",")
+
+	artifacts := artifactConfig.GetByArtifactsByNameWithFilter(filters)
+
+	for _, artifact := range artifacts {
 		filename, err := slarty.GetArtifactName(artifact.Name, artifactConfig)
 		if err != nil {
 			log.Fatalln(err)
@@ -67,6 +72,11 @@ func runArtifactNames(cmd *cobra.Command, args []string) {
 			longestFilename = len(filename)
 		}
 		artifactNames[artifact.Name] = filename
+	}
+
+	if longestName == 0 {
+		fmt.Println("No artifacts found")
+		return
 	}
 
 	separator := strings.Repeat("-", longestName+2) + "\t" + strings.Repeat("-", longestFilename+2) + "\n"
@@ -88,7 +98,7 @@ func init() {
 	rootCmd.AddCommand(artifactNamesCmd)
 
 	// Here you will define your flags and configuration settings.
-
+	artifactNamesCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"application1,application2\"")
 	// Cobra supports Persistent Flags which will work for this command
 	// and all subcommands, e.g.:
 	// artifactNamesCmd.PersistentFlags().String("foo", "", "A help for foo")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"path/filepath"
+	"strings"
 )
 
 type Repository struct {
@@ -24,7 +25,7 @@ type ArtifactConfig struct {
 	Command         string   `json:"command"`
 	OutputDirectory string   `json:"output_directory"`
 	DeployLocation  string   `json:"deploy_location"`
-		ArtifactPrefix  string   `json:"artifact_prefix"`
+	ArtifactPrefix  string   `json:"artifact_prefix"`
 }
 
 type Asset struct {
@@ -49,6 +50,25 @@ func (ac *ArtifactsConfig) GetArtifactConfig(artifactname string) (*ArtifactConf
 	}
 
 	return nil, errors.New("config for " + artifactname + " name not found in artifacts.json")
+}
+
+func (ac *ArtifactsConfig) GetByArtifactsByNameWithFilter(filter []string) []ArtifactConfig {
+	if len(filter) == 0 {
+		return ac.Artifacts[:]
+	}
+
+	var selected []ArtifactConfig
+	for i := range ac.Artifacts {
+		name := strings.ToLower(ac.Artifacts[i].Name)
+		for _, f := range filter {
+			if name == strings.TrimSpace(strings.ToLower(f)) {
+				selected = append(selected, ac.Artifacts[i])
+				break
+			}
+		}
+	}
+
+	return selected
 }
 
 func ReadArtifactsJson(path string) (*ArtifactsConfig, error) {

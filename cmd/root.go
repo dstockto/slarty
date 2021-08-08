@@ -23,8 +23,11 @@ import (
 	"github.com/spf13/viper"
 )
 
-var cfgFile string
-var artifactsJson string
+var (
+	cfgFile       string
+	artifactsJson string
+	filter        string
+)
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
