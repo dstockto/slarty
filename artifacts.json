@@ -4,7 +4,11 @@
   "repository": {
     "adapter": "Local",
     "options": {
-      "root": "/tmp/artifact-repo"
+      "root": "/tmp/artifact-repo",
+      "region": "us-east-1",
+      "bucket-name": "<aws bucket name>",
+      "path-prefix": "path/to/repo",
+      "profile": "default (optional)"
     }
   },
   "artifacts": [
