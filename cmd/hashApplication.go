@@ -31,16 +31,16 @@ import (
 	"text/tabwriter"
 )
 
-// artifactNamesCmd represents the artifactNames command
-var artifactNamesCmd = &cobra.Command{
-	Use:   "artifact-names [--config=...]",
-	Short: "List the artifacts defined in a config file",
-	Long: `Lists the names of the artifacts defined in either the artifacts.json in the current 
-directory (default) or from another artifacts.json specified with the --config/-c flag.`,
-	Run: runArtifactNames,
+// hashApplicationCmd represents the hashApplication command
+var hashApplicationCmd = &cobra.Command{
+	Use:   "hash-application",
+	Short: "Calculates the hashes for applications defined in artifacts.json",
+	Long: `Outputs the hashes for the applications defined in the artifacts.json config
+file.`,
+	Run: runHashApplication,
 }
 
-func runArtifactNames(cmd *cobra.Command, args []string) {
+func runHashApplication(cmd *cobra.Command, args []string) {
 	artifactConfig, err := slarty.ReadArtifactsJson(artifactsJson)
 	if err != nil {
 		log.Fatalln(err)
@@ -51,30 +51,27 @@ func runArtifactNames(cmd *cobra.Command, args []string) {
 		log.Fatalln(err)
 	}
 
-	artifactNames := make(map[string]string)
+	artifactHashes := make(map[string]string)
 	var longestName int
-	var longestFilename int
+	var longestHash int
 
 	var filters []string
 	if filter != "" {
 		filters = strings.Split(filter, ",")
 	}
-
 	artifacts := artifactConfig.GetByArtifactsByNameWithFilter(filters)
-
 	for _, artifact := range artifacts {
-		filename, err := slarty.GetArtifactName(artifact.Name, artifactConfig)
+		hash, err := slarty.HashDirectories(artifactConfig.RootDirectory, artifact.Directories)
 		if err != nil {
 			log.Fatalln(err)
 		}
-
+		artifactHashes[artifact.Name] = hash
 		if len(artifact.Name) > longestName {
 			longestName = len(artifact.Name)
 		}
-		if len(filename) > longestFilename {
-			longestFilename = len(filename)
+		if len(hash) > longestHash {
+			longestHash = len(hash)
 		}
-		artifactNames[artifact.Name] = filename
 	}
 
 	if longestName == 0 {
@@ -82,31 +79,32 @@ func runArtifactNames(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	separator := strings.Repeat("-", longestName+2) + "\t" + strings.Repeat("-", longestFilename+2) + "\n"
+	separator := strings.Repeat("-", longestName+2) + "\t" + strings.Repeat("-", longestHash+2) + "\n"
 
 	fmt.Fprintf(w, separator)
-	fmt.Fprintf(w, " %s \t %s \n", "Application", "Artifact Name")
+	fmt.Fprintf(w, " %s \t %s \n", "Application", "Hash")
 	fmt.Fprintf(w, separator)
 
-	for name := range artifactNames {
-		fmt.Fprintf(w, " "+name+"\t "+artifactNames[name]+"\n")
+	for name := range artifactHashes {
+		fmt.Fprintf(w, " "+name+"\t "+artifactHashes[name]+"\n")
 	}
 
 	fmt.Fprintf(w, separator)
 
 	w.Flush()
+
 }
 
 func init() {
-	rootCmd.AddCommand(artifactNamesCmd)
+	rootCmd.AddCommand(hashApplicationCmd)
 
 	// Here you will define your flags and configuration settings.
-	artifactNamesCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"application1,application2\"")
+
 	// Cobra supports Persistent Flags which will work for this command
 	// and all subcommands, e.g.:
-	// artifactNamesCmd.PersistentFlags().String("foo", "", "A help for foo")
-
+	// hashApplicationCmd.PersistentFlags().String("foo", "", "A help for foo")
+	hashApplicationCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"application1,application2\"")
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
-	// artifactNamesCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	// hashApplicationCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

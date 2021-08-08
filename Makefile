@@ -2,7 +2,7 @@
 	echo "Make slarty!"
 
 format:
-	go fmt go fmt github.com/dstockto/slarty/...
+	go fmt github.com/dstockto/slarty/...
 
 build-all: clean mac-amd64-binary mac-arm64-binary linux-amd-binary linux-arm-binary windows-binary
 
