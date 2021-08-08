@@ -13,14 +13,24 @@
   },
   "artifacts": [
     {
-      "name": "slarty-mac",
+      "name": "slarty-mac-amd64",
       "directories": [
-        "src"
+        "."
       ],
-      "command": "make mac-binary",
-      "output_directory": "build/mac",
-      "deploy_location": "build/mac-deploy",
-      "artifact_prefix": "slarty-mac"
+      "command": "make mac-amd64-binary",
+      "output_directory": "build/mac-amd64",
+      "deploy_location": "deploy/mac-amd64",
+      "artifact_prefix": "slarty-mac-amd64"
+    },
+    {
+      "name": "slarty-mac-arm64",
+      "directories": [
+        "."
+      ],
+      "command": "make mac-arm64-binary",
+      "output_directory": "build/mac-arm64",
+      "deploy_location": "deploy/mac-arm64",
+      "artifact_prefix": "slarty-mac-arm64"
     }
   ],
   "assets": [

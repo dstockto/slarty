@@ -4,11 +4,18 @@
 format:
 	go fmt go fmt github.com/dstockto/slarty/...
 
-build-all: mac-binary linux-amd-binary linux-arm-binary windows-binary
+build-all: clean mac-amd64-binary mac-arm64-binary linux-amd-binary linux-arm-binary windows-binary
 
-mac-binary:
-	GOOS=darwin GOARCH=amd64 go build -o build/mac/slarty
-	chmod +x build/mac/slarty
+clean:
+	rm -rf build/*
+
+mac-amd64-binary:
+	GOOS=darwin GOARCH=amd64 go build -o build/mac-amd64/slarty
+	chmod +x build/mac-amd64/slarty
+
+mac-arm64-binary:
+	GOOS=darwin GOARCH=arm64 go build -o build/mac-arm64/slarty
+	chmod +x build/mac-arm64/slarty
 
 linux-amd-binary:
 	GOOS=linux GOARCH=amd64 go build -o build/linux-amd64/slarty
