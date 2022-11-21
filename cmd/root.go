@@ -27,6 +27,7 @@ var (
 	cfgFile       string
 	artifactsJson string
 	filter        string
+	local         bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -57,6 +58,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.slarty.yaml)")
 	rootCmd.PersistentFlags().StringVarP(&artifactsJson, "artifacts", "a", "./artifacts.json", "path to artifacts.json")
+	rootCmd.PersistentFlags().BoolVarP(&local, "local", "l", false, "-l (use local repo settings)")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
