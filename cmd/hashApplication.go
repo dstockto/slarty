@@ -47,9 +47,6 @@ func runHashApplication(cmd *cobra.Command, args []string) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	if err != nil {
-		log.Fatalln(err)
-	}
 
 	artifactHashes := make(map[string]string)
 	var longestName int

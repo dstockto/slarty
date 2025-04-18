@@ -47,9 +47,6 @@ func runArtifactNames(cmd *cobra.Command, args []string) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	if err != nil {
-		log.Fatalln(err)
-	}
 
 	artifactNames := make(map[string]string)
 	var longestName int
