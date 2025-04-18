@@ -5,7 +5,7 @@
     "adapter": "Local",
     "options": {
       "root": "/tmp/artifact-repo",
-      "region": "us-east-1",
+      "region": "us-west-1",
       "bucket-name": "<aws bucket name>",
       "path-prefix": "path/to/repo",
       "profile": "default (optional)"
