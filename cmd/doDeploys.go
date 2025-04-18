@@ -39,7 +39,7 @@ var doDeploysCmd = &cobra.Command{
 	Short: "Deploy artifacts from the repository",
 	Long: `Deploys artifacts from the repository to their deploy locations.
 The command identifies the archives that match the current repository's code state,
-downloads them from the repository, and unzips them into the deploy_location directory.
+downloads them from the repository, and extracts them into the deploy_location directory.
 If an archive cannot be found in the repository, it will be treated as a fatal error.`,
 	Run: runDoDeploys,
 }
@@ -97,7 +97,7 @@ func runDoDeploys(cmd *cobra.Command, args []string) {
 		fmt.Printf("Found artifact %s for %s\n", artifactName, artifact.Name)
 
 		// Create a temporary file to download the artifact
-		tempFile, err := os.CreateTemp("", "slarty-*.zip")
+		tempFile, err := os.CreateTemp("", "slarty-*.tar.gz")
 		if err != nil {
 			log.Fatalf("Failed to create temporary file: %v", err)
 		}
@@ -120,26 +120,26 @@ func runDoDeploys(cmd *cobra.Command, args []string) {
 			log.Fatalf("Failed to create deploy directory: %v", err)
 		}
 
-		// Unzip the artifact to the deploy location
+		// Extract the artifact to the deploy location
 		err = unzipFile(tempFilePath, deployPath)
 		if err != nil {
 			os.Remove(tempFilePath)
-			log.Fatalf("Failed to unzip artifact: %v", err)
+			log.Fatalf("Failed to extract artifact: %v", err)
 		}
-		fmt.Println(" - Unzipped artifact")
+		fmt.Println(" - Extracted artifact")
 
 		// Delete the temporary file
 		os.Remove(tempFilePath)
-		fmt.Println(" - Deleted (zip) artifact")
+		fmt.Println(" - Deleted (tar.gz) artifact")
 	}
 }
 
-// unzipFile extracts the contents of a zip file to a destination directory
-func unzipFile(zipPath, destDir string) error {
-	// Open the zip file
-	reader, err := zip.OpenReader(zipPath)
+// unzipFile extracts the contents of a tar.gz file to a destination directory
+func unzipFile(tarGzPath, destDir string) error {
+	// Open the tar.gz file
+	reader, err := zip.OpenReader(tarGzPath)
 	if err != nil {
-		return fmt.Errorf("failed to open zip file: %w", err)
+		return fmt.Errorf("failed to open tar.gz file: %w", err)
 	}
 	defer reader.Close()
 
@@ -160,7 +160,7 @@ func unzipFile(zipPath, destDir string) error {
 	return nil
 }
 
-// extractFile extracts a single file from a zip archive
+// extractFile extracts a single file from a tar.gz archive
 func extractFile(file *zip.File, destDir string) error {
 	// Prepare the destination path
 	destPath := filepath.Join(destDir, file.Name)
@@ -176,10 +176,10 @@ func extractFile(file *zip.File, destDir string) error {
 		return fmt.Errorf("failed to create directory for file: %w", err)
 	}
 
-	// Open the file from the zip
+	// Open the file from the tar.gz
 	srcFile, err := file.Open()
 	if err != nil {
-		return fmt.Errorf("failed to open file from zip: %w", err)
+		return fmt.Errorf("failed to open file from tar.gz: %w", err)
 	}
 	defer srcFile.Close()
 

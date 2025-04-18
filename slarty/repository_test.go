@@ -23,7 +23,7 @@ func TestLocalRepositoryAdapter(t *testing.T) {
 
 	// Create a test artifact file
 	artifactContent := []byte("test artifact content")
-	artifactPath := filepath.Join(tempDir, "test-artifact.zip")
+	artifactPath := filepath.Join(tempDir, "test-artifact.tar.gz")
 	err = os.WriteFile(artifactPath, artifactContent, 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test artifact: %v", err)
@@ -34,13 +34,13 @@ func TestLocalRepositoryAdapter(t *testing.T) {
 
 	// Test StoreArtifact
 	t.Run("StoreArtifact", func(t *testing.T) {
-		err := adapter.StoreArtifact(artifactPath, "test-artifact.zip")
+		err := adapter.StoreArtifact(artifactPath, "test-artifact.tar.gz")
 		if err != nil {
 			t.Fatalf("StoreArtifact failed: %v", err)
 		}
 
 		// Verify the artifact was stored
-		storedPath := filepath.Join(repoDir, "test-artifact.zip")
+		storedPath := filepath.Join(repoDir, "test-artifact.tar.gz")
 		if _, err := os.Stat(storedPath); os.IsNotExist(err) {
 			t.Fatalf("Artifact was not stored in repository")
 		}
@@ -58,20 +58,20 @@ func TestLocalRepositoryAdapter(t *testing.T) {
 	// Test ArtifactExists
 	t.Run("ArtifactExists", func(t *testing.T) {
 		// Test existing artifact
-		if !adapter.ArtifactExists("test-artifact.zip") {
+		if !adapter.ArtifactExists("test-artifact.tar.gz") {
 			t.Fatalf("ArtifactExists returned false for existing artifact")
 		}
 
 		// Test non-existing artifact
-		if adapter.ArtifactExists("non-existing-artifact.zip") {
+		if adapter.ArtifactExists("non-existing-artifact.tar.gz") {
 			t.Fatalf("ArtifactExists returned true for non-existing artifact")
 		}
 	})
 
 	// Test RetrieveArtifact
 	t.Run("RetrieveArtifact", func(t *testing.T) {
-		retrievePath := filepath.Join(tempDir, "retrieved-artifact.zip")
-		err := adapter.RetrieveArtifact("test-artifact.zip", retrievePath)
+		retrievePath := filepath.Join(tempDir, "retrieved-artifact.tar.gz")
+		err := adapter.RetrieveArtifact("test-artifact.tar.gz", retrievePath)
 		if err != nil {
 			t.Fatalf("RetrieveArtifact failed: %v", err)
 		}
@@ -91,7 +91,7 @@ func TestLocalRepositoryAdapter(t *testing.T) {
 		}
 
 		// Test retrieving non-existing artifact
-		err = adapter.RetrieveArtifact("non-existing-artifact.zip", retrievePath)
+		err = adapter.RetrieveArtifact("non-existing-artifact.tar.gz", retrievePath)
 		if err == nil {
 			t.Fatalf("RetrieveArtifact did not fail for non-existing artifact")
 		}

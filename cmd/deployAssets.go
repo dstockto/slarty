@@ -36,7 +36,7 @@ var deployAssetsCmd = &cobra.Command{
 	Use:   "deploy-assets",
 	Short: "Deploy assets from the repository",
 	Long: `Deploys assets from the repository to their deploy locations.
-The command downloads assets from the repository and unzips them to the
+The command downloads assets from the repository and extracts them to the
 specified deploy locations. If an asset cannot be found in the repository,
 it will be treated as a fatal error.`,
 	Run: runDeployAssets,
@@ -100,7 +100,7 @@ func runDeployAssets(cmd *cobra.Command, args []string) {
 		}
 
 		// Create a temporary file to download the asset
-		tempFile, err := os.CreateTemp("", "slarty-asset-*.zip")
+		tempFile, err := os.CreateTemp("", "slarty-asset-*.tar.gz")
 		if err != nil {
 			log.Fatalf("Failed to create temporary file: %v", err)
 		}
@@ -123,17 +123,17 @@ func runDeployAssets(cmd *cobra.Command, args []string) {
 			log.Fatalf("Failed to create deploy directory: %v", err)
 		}
 
-		// Unzip the asset to the deploy location
+		// Extract the asset to the deploy location
 		err = unzipFile(tempFilePath, deployPath)
 		if err != nil {
 			os.Remove(tempFilePath)
-			log.Fatalf("Failed to unzip asset: %v", err)
+			log.Fatalf("Failed to extract asset: %v", err)
 		}
-		fmt.Println(" - Unzipped asset")
+		fmt.Println(" - Extracted asset")
 
 		// Delete the temporary file
 		os.Remove(tempFilePath)
-		fmt.Println(" - Deleted (zip) asset")
+		fmt.Println(" - Deleted (tar.gz) asset")
 	}
 }
 

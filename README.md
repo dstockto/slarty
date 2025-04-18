@@ -4,7 +4,7 @@ Slarty is an artifact manager to help simplify build and deploy processes dealin
 
 ## What is an Artifact?
 
-An artifact is the result of a code change - meaning it could be a compiled executable, a zip file containing transpiled javascript or even just the contents of a project directory if that's what is needed to allow the application to run on a server. In short, an artifact ultimate ends of being a zip file containing code or binaries or a combination of those which can be used whenever we'd otherwise need to build an application.
+An artifact is the result of a code change - meaning it could be a compiled executable, a tar.gz file containing transpiled javascript or even just the contents of a project directory if that's what is needed to allow the application to run on a server. In short, an artifact ultimate ends of being a tar.gz file containing code or binaries or a combination of those which can be used whenever we'd otherwise need to build an application.
 
 ## What is an asset?
 
@@ -22,7 +22,7 @@ Slarty uses git to uniquely identify the contents of directories. It currently w
 
 By condensing the contents of a directory or directories down to a single unique value before building and using a predictable way to identify the resulting artifact file, we can quickly decide if a build is needed or if we've already built an artifact for this particular unique combination of code. Slarty can, with the help of an `artifacts.json` configuration file, programmatically determine if a build is needed and kick it off if it is. Once it is done, it can store that artifact in a repository that it can later use to determine that it won't need to build again until the code is different.
 
-Additionally, Slarty can download and deploy those artifacts. Currently deployment is literally downloading and unzipping to the configured location. This download and unzipping process is very fast and saves a ton of time over building on the web server. It also means we don't need npm or node (or other software only used for building) on the web server.
+Additionally, Slarty can download and deploy those artifacts. Currently deployment is literally downloading and extracting to the configured location. This download and extraction process is very fast and saves a ton of time over building on the web server. It also means we don't need npm or node (or other software only used for building) on the web server.
 
 To summarize, Slarty allows for repeatable, predictable deploys and eliminates the need to rebuild artifacts that have been built already.
 
@@ -83,7 +83,7 @@ Most of the values should be obvious what they are for. The path-prefix is the o
 
 ### Configuration - "artifacts" section
 
-The artifacts section is an array of objects. Each of those objects defines the information needed to determine how to calculate the identifier, how to name the artifact, how to cause a build to happen and where to unzip an artifact to deploy.
+The artifacts section is an array of objects. Each of those objects defines the information needed to determine how to calculate the identifier, how to name the artifact, how to cause a build to happen and where to extract an artifact to deploy.
 
 An example:
 
@@ -102,14 +102,14 @@ An example:
 * **name** - The name of the artifact or build is used in the output of various Slarty commands
 * **directories** - Though the name is "directories" it will also work with individual files. These are used to determine the unique identifier. The idea is if anything in one or more of the directories has changed then the build output would be different. If files outside of these paths change and it causes different output from the build process, then those files or directories should be included in this array.
 * **command** - This is the command that is executed to create the build output. It should be executable from the application's root directory
-* **output_directory** - This is the directory that will be zipped to form the archive file that will be stored in the repository
-* **deploy_location** - This is the location where the archive should be unzipped to
-* **artifact_prefix** - This value is used in part of the naming of the archive zip file. The archive name is essentially {archive_prefix}-{hash}.zip. It helps identify what the artifact belong to or came from if looking on the file system.
+* **output_directory** - This is the directory that will be archived to form the tar.gz file that will be stored in the repository
+* **deploy_location** - This is the location where the archive should be extracted to
+* **artifact_prefix** - This value is used in part of the naming of the archive tar.gz file. The archive name is essentially {archive_prefix}-{hash}.tar.gz. It helps identify what the artifact belong to or came from if looking on the file system.
 * **root** - (Not currently supported) The root value at the artifact level is optional and you may never need to use it. By default, each artifact will use the root directory from the root of the configuration. If you need, for some reason, to calculate a hash from a different starting location for an application, you could provide that different root here. Again, in most cases you will not need this.
 
 ## Configuration - "assets" section
 
-The assets section is an array of objects. Each object defines the information needed to retrieve an asset from the artifact repository as well as where it should be unzipped to. At this time, the assets section only is used for the `deploy-assets` command. No other command uses or is aware of this section.
+The assets section is an array of objects. Each object defines the information needed to retrieve an asset from the artifact repository as well as where it should be extracted to. At this time, the assets section only is used for the `deploy-assets` command. No other command uses or is aware of this section.
 
 An example:
 
@@ -152,10 +152,10 @@ The `artifact-names` command can accept [-c|--config] and [-f|--filter] options.
  ------------- --------------------------------------------------------------
   Application   Artifact Name
  ------------- --------------------------------------------------------------
-  source        slarty-source-15ab98133cfacf640b76d7fdf7890211110e5041.zip
-  Services      slarty-services-91f042b9df7c50b59ab08c657d09c81442e04a65.zip
-  Models        slarty-models-51286ac4976b8dc1667d8f7bc033806e858cb7b7.zip
-  AMess         slarty-mess-f2788bbe13c3240951a10d97593467a68502e2f7.zip
+  source        slarty-source-15ab98133cfacf640b76d7fdf7890211110e5041.tar.gz
+  Services      slarty-services-91f042b9df7c50b59ab08c657d09c81442e04a65.tar.gz
+  Models        slarty-models-51286ac4976b8dc1667d8f7bc033806e858cb7b7.tar.gz
+  AMess         slarty-mess-f2788bbe13c3240951a10d97593467a68502e2f7.tar.gz
  ------------- --------------------------------------------------------------
 
 ```
@@ -213,7 +213,7 @@ Beginning build for source application
 
  Build succeeded for source
  1/2 [==============>-------------]  50%
--- Saved slarty-source-15ab98133cfacf640b76d7fdf7890211110e5041.zip to repository.
+-- Saved slarty-source-15ab98133cfacf640b76d7fdf7890211110e5041.tar.gz to repository.
 
 Beginning build for Services application
 ----------------------------------------
@@ -227,28 +227,28 @@ If the `--force` option were provided in the example above, then all four builds
 
 ### slarty do-deploys
 
-Like most of the commands above, the `do-deploys` command accepts the `[-c|--config]` and `[-f|--fiter]` options. The purpose of the `do-deploys` command is to identify the archives that match the current repository's code state, download those from the repository, and unzip them into the `deploy_location` directory. If the archive cannot be found in the repository then it will be treated as a fatal error. This is to keep the steps of building and deploying strictly separated. Ideally, building happens on a Continuous Integration (CI) server while deployment would happen on the web or application server.
+Like most of the commands above, the `do-deploys` command accepts the `[-c|--config]` and `[-f|--fiter]` options. The purpose of the `do-deploys` command is to identify the archives that match the current repository's code state, download those from the repository, and extract them into the `deploy_location` directory. If the archive cannot be found in the repository then it will be treated as a fatal error. This is to keep the steps of building and deploying strictly separated. Ideally, building happens on a Continuous Integration (CI) server while deployment would happen on the web or application server.
 
 ```
-Found artifact slarty-source-15ab98133cfacf640b76d7fdf7890211110e5041.zip for source
+Found artifact slarty-source-15ab98133cfacf640b76d7fdf7890211110e5041.tar.gz for source
  - Downloaded artifact
- - Unzipped artifact
- - Deleted (zip) artifact
-Found artifact slarty-services-91f042b9df7c50b59ab08c657d09c81442e04a65.zip for Services
+ - Extracted artifact
+ - Deleted (tar.gz) artifact
+Found artifact slarty-services-91f042b9df7c50b59ab08c657d09c81442e04a65.tar.gz for Services
  - Downloaded artifact
- - Unzipped artifact
- - Deleted (zip) artifact
-Found artifact slarty-models-51286ac4976b8dc1667d8f7bc033806e858cb7b7.zip for Models
+ - Extracted artifact
+ - Deleted (tar.gz) artifact
+Found artifact slarty-models-51286ac4976b8dc1667d8f7bc033806e858cb7b7.tar.gz for Models
  - Downloaded artifact
- - Unzipped artifact
- - Deleted (zip) artifact
-Found artifact slarty-mess-f2788bbe13c3240951a10d97593467a68502e2f7.zip for AMess
+ - Extracted artifact
+ - Deleted (tar.gz) artifact
+Found artifact slarty-mess-f2788bbe13c3240951a10d97593467a68502e2f7.tar.gz for AMess
  - Downloaded artifact
- - Unzipped artifact
- - Deleted (zip) artifact
+ - Extracted artifact
+ - Deleted (tar.gz) artifact
 ```
 
-The `do-deploy` process will create the directory structure specified in the `deploy_location` value. However, if that structure exists and contains files, it will not be cleared. That is a separate responsibility that should be taken care of elsewhere. The idea is that if an application needs to deploy several artifacts to the same place, it can do so. The unzipping command will overwrite any existing files that are in place when the deploy occurs. It will not remove any files that were already in place, so if a file existed in one deployment archive and then does not exist in the next, it would still exist in the deployment output directory.
+The `do-deploy` process will create the directory structure specified in the `deploy_location` value. However, if that structure exists and contains files, it will not be cleared. That is a separate responsibility that should be taken care of elsewhere. The idea is that if an application needs to deploy several artifacts to the same place, it can do so. The extraction command will overwrite any existing files that are in place when the deploy occurs. It will not remove any files that were already in place, so if a file existed in one deployment archive and then does not exist in the next, it would still exist in the deployment output directory.
 
 ### slarty deploy-assets
 
@@ -301,7 +301,7 @@ Below is a full example config for an app that has two separate builds and artif
       "artifact_prefix": "green-app"
     },
   ],
-  
+
   "assets": [
       {
         "name": "Some Asset",

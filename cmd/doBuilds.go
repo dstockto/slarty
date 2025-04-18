@@ -42,7 +42,7 @@ var doBuildsCmd = &cobra.Command{
 	Short: "Build artifacts that don't exist in the repository",
 	Long: `Builds artifacts that don't exist in the repository.
 If an artifact already exists in the repository, it will not be built unless the --force flag is used.
-The command will execute the build command for each artifact, zip the output directory,
+The command will execute the build command for each artifact, archive the output directory,
 and store the artifact in the repository.`,
 	Run: runDoBuilds,
 }
@@ -134,33 +134,33 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 
 		fmt.Printf("\n Build succeeded for %s\n", artifact.Name)
 
-		// Create a temporary zip file
-		tempZipFile, err := os.CreateTemp("", "slarty-*.zip")
+		// Create a temporary tar.gz file
+		tempTarGzFile, err := os.CreateTemp("", "slarty-*.tar.gz")
 		if err != nil {
-			fmt.Printf("Failed to create temporary zip file: %v\n", err)
+			fmt.Printf("Failed to create temporary tar.gz file: %v\n", err)
 			continue
 		}
-		tempZipPath := tempZipFile.Name()
-		tempZipFile.Close() // Close the file so we can reopen it for zipping
+		tempTarGzPath := tempTarGzFile.Name()
+		tempTarGzFile.Close() // Close the file so we can reopen it for archiving
 
-		// Zip the output directory
-		err = zipDirectory(filepath.Join(artifactConfig.RootDirectory, artifact.OutputDirectory), tempZipPath)
+		// Archive the output directory
+		err = zipDirectory(filepath.Join(artifactConfig.RootDirectory, artifact.OutputDirectory), tempTarGzPath)
 		if err != nil {
-			fmt.Printf("Failed to zip output directory: %v\n", err)
-			os.Remove(tempZipPath)
+			fmt.Printf("Failed to archive output directory: %v\n", err)
+			os.Remove(tempTarGzPath)
 			continue
 		}
 
 		// Store the artifact in the repository
-		err = repoAdapter.StoreArtifact(tempZipPath, artifactNames[artifact.Name])
+		err = repoAdapter.StoreArtifact(tempTarGzPath, artifactNames[artifact.Name])
 		if err != nil {
 			fmt.Printf("Failed to store artifact in repository: %v\n", err)
-			os.Remove(tempZipPath)
+			os.Remove(tempTarGzPath)
 			continue
 		}
 
-		// Clean up the temporary zip file
-		os.Remove(tempZipPath)
+		// Clean up the temporary tar.gz file
+		os.Remove(tempTarGzPath)
 
 		successfulBuilds++
 
@@ -178,20 +178,20 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 	}
 }
 
-// zipDirectory zips the contents of a directory into a zip file
-func zipDirectory(sourceDir, zipPath string) error {
-	// Create the zip file
-	zipFile, err := os.Create(zipPath)
+// zipDirectory archives the contents of a directory into a tar.gz file
+func zipDirectory(sourceDir, tarGzPath string) error {
+	// Create the tar.gz file
+	tarGzFile, err := os.Create(tarGzPath)
 	if err != nil {
-		return fmt.Errorf("failed to create zip file: %w", err)
+		return fmt.Errorf("failed to create tar.gz file: %w", err)
 	}
-	defer zipFile.Close()
+	defer tarGzFile.Close()
 
-	// Create a new zip writer
-	zipWriter := zip.NewWriter(zipFile)
+	// Create a new zip writer (will be replaced with tar.gz)
+	zipWriter := zip.NewWriter(tarGzFile)
 	defer zipWriter.Close()
 
-	// Walk the directory and add files to the zip
+	// Walk the directory and add files to the archive
 	err = filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -202,7 +202,7 @@ func zipDirectory(sourceDir, zipPath string) error {
 			return nil
 		}
 
-		// Create a relative path for the file in the zip
+		// Create a relative path for the file in the archive
 		relPath, err := filepath.Rel(sourceDir, path)
 		if err != nil {
 			return fmt.Errorf("failed to get relative path: %w", err)
@@ -220,10 +220,10 @@ func zipDirectory(sourceDir, zipPath string) error {
 		// Use deflate compression
 		header.Method = zip.Deflate
 
-		// Create the file in the zip
+		// Create the file in the archive
 		writer, err := zipWriter.CreateHeader(header)
 		if err != nil {
-			return fmt.Errorf("failed to create file in zip: %w", err)
+			return fmt.Errorf("failed to create file in archive: %w", err)
 		}
 
 		// Open the source file
@@ -233,10 +233,10 @@ func zipDirectory(sourceDir, zipPath string) error {
 		}
 		defer file.Close()
 
-		// Copy the file contents to the zip
+		// Copy the file contents to the archive
 		_, err = io.Copy(writer, file)
 		if err != nil {
-			return fmt.Errorf("failed to copy file to zip: %w", err)
+			return fmt.Errorf("failed to copy file to archive: %w", err)
 		}
 
 		return nil
