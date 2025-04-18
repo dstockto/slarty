@@ -1,5 +1,5 @@
 /*
-Copyright © 2021 David Stockton <dave@davidstockton.com>
+Copyright © 2025 David Stockton <dave@davidstockton.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
