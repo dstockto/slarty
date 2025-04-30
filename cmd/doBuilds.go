@@ -22,7 +22,8 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"archive/zip"
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
 	"github.com/dstockto/slarty/slarty"
 	"github.com/spf13/cobra"
@@ -187,19 +188,18 @@ func zipDirectory(sourceDir, tarGzPath string) error {
 	}
 	defer tarGzFile.Close()
 
-	// Create a new zip writer (will be replaced with tar.gz)
-	zipWriter := zip.NewWriter(tarGzFile)
-	defer zipWriter.Close()
+	// Create a gzip writer
+	gzipWriter := gzip.NewWriter(tarGzFile)
+	defer gzipWriter.Close()
+
+	// Create a tar writer
+	tarWriter := tar.NewWriter(gzipWriter)
+	defer tarWriter.Close()
 
 	// Walk the directory and add files to the archive
 	err = filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
-		}
-
-		// Skip directories themselves (we'll create them when needed)
-		if info.IsDir() {
-			return nil
 		}
 
 		// Create a relative path for the file in the archive
@@ -208,22 +208,27 @@ func zipDirectory(sourceDir, tarGzPath string) error {
 			return fmt.Errorf("failed to get relative path: %w", err)
 		}
 
-		// Create a new file header
-		header, err := zip.FileInfoHeader(info)
+		// Create a tar header
+		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
-			return fmt.Errorf("failed to create file header: %w", err)
+			return fmt.Errorf("failed to create tar header: %w", err)
 		}
 
 		// Set the name to the relative path
 		header.Name = relPath
 
-		// Use deflate compression
-		header.Method = zip.Deflate
+		// Skip directories themselves (we'll create them when needed)
+		if info.IsDir() {
+			// For directories, write the header and continue
+			if err := tarWriter.WriteHeader(header); err != nil {
+				return fmt.Errorf("failed to write directory header: %w", err)
+			}
+			return nil
+		}
 
-		// Create the file in the archive
-		writer, err := zipWriter.CreateHeader(header)
-		if err != nil {
-			return fmt.Errorf("failed to create file in archive: %w", err)
+		// Write the header to the tar archive
+		if err := tarWriter.WriteHeader(header); err != nil {
+			return fmt.Errorf("failed to write file header: %w", err)
 		}
 
 		// Open the source file
@@ -234,7 +239,7 @@ func zipDirectory(sourceDir, tarGzPath string) error {
 		defer file.Close()
 
 		// Copy the file contents to the archive
-		_, err = io.Copy(writer, file)
+		_, err = io.Copy(tarWriter, file)
 		if err != nil {
 			return fmt.Errorf("failed to copy file to archive: %w", err)
 		}

@@ -3,7 +3,7 @@ package slarty
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -13,8 +13,8 @@ type Repository struct {
 	Options struct {
 		Root       string `json:"root"`
 		Region     string `json:"region"`
-		BucketName string `json:"bucket_name"`
-		PathPrefix string `json:"path_prefix"`
+		BucketName string `json:"bucket-name"`
+		PathPrefix string `json:"path-prefix"`
 		Profile    string `json:"profile"`
 	} `json:"options"`
 }
@@ -72,7 +72,7 @@ func (ac *ArtifactsConfig) GetByArtifactsByNameWithFilter(filter []string) []Art
 }
 
 func ReadArtifactsJson(path string) (*ArtifactsConfig, error) {
-	file, err := ioutil.ReadFile(path)
+	file, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

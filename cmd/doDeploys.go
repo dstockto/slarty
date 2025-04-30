@@ -22,7 +22,8 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"archive/zip"
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
 	"github.com/dstockto/slarty/slarty"
 	"github.com/spf13/cobra"
@@ -137,11 +138,21 @@ func runDoDeploys(cmd *cobra.Command, args []string) {
 // unzipFile extracts the contents of a tar.gz file to a destination directory
 func unzipFile(tarGzPath, destDir string) error {
 	// Open the tar.gz file
-	reader, err := zip.OpenReader(tarGzPath)
+	file, err := os.Open(tarGzPath)
 	if err != nil {
 		return fmt.Errorf("failed to open tar.gz file: %w", err)
 	}
-	defer reader.Close()
+	defer file.Close()
+
+	// Create a gzip reader
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzipReader.Close()
+
+	// Create a tar reader
+	tarReader := tar.NewReader(gzipReader)
 
 	// Create destination directory if it doesn't exist
 	err = os.MkdirAll(destDir, 0755)
@@ -150,8 +161,16 @@ func unzipFile(tarGzPath, destDir string) error {
 	}
 
 	// Extract each file
-	for _, file := range reader.File {
-		err := extractFile(file, destDir)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break // End of archive
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read tar header: %w", err)
+		}
+
+		err = extractTarFile(header, tarReader, destDir)
 		if err != nil {
 			return err
 		}
@@ -160,40 +179,41 @@ func unzipFile(tarGzPath, destDir string) error {
 	return nil
 }
 
-// extractFile extracts a single file from a tar.gz archive
-func extractFile(file *zip.File, destDir string) error {
+// extractTarFile extracts a single file from a tar.gz archive
+func extractTarFile(header *tar.Header, tarReader *tar.Reader, destDir string) error {
 	// Prepare the destination path
-	destPath := filepath.Join(destDir, file.Name)
+	destPath := filepath.Join(destDir, header.Name)
 
-	// Create directory if needed
-	if file.FileInfo().IsDir() {
-		return os.MkdirAll(destPath, file.Mode())
-	}
+	// Handle different types of files
+	switch header.Typeflag {
+	case tar.TypeDir:
+		// Create directory
+		err := os.MkdirAll(destPath, 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+	case tar.TypeReg:
+		// Create the directory for the file
+		err := os.MkdirAll(filepath.Dir(destPath), 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create directory for file: %w", err)
+		}
 
-	// Create the directory for the file
-	err := os.MkdirAll(filepath.Dir(destPath), 0755)
-	if err != nil {
-		return fmt.Errorf("failed to create directory for file: %w", err)
-	}
+		// Create the destination file
+		destFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(header.Mode))
+		if err != nil {
+			return fmt.Errorf("failed to create destination file: %w", err)
+		}
+		defer destFile.Close()
 
-	// Open the file from the tar.gz
-	srcFile, err := file.Open()
-	if err != nil {
-		return fmt.Errorf("failed to open file from tar.gz: %w", err)
-	}
-	defer srcFile.Close()
-
-	// Create the destination file
-	destFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, file.Mode())
-	if err != nil {
-		return fmt.Errorf("failed to create destination file: %w", err)
-	}
-	defer destFile.Close()
-
-	// Copy the file contents
-	_, err = io.Copy(destFile, srcFile)
-	if err != nil {
-		return fmt.Errorf("failed to copy file contents: %w", err)
+		// Copy the file contents
+		_, err = io.Copy(destFile, tarReader)
+		if err != nil {
+			return fmt.Errorf("failed to copy file contents: %w", err)
+		}
+	default:
+		// Skip other types of files (symlinks, etc.)
+		// Could be handled in the future if needed
 	}
 
 	return nil
