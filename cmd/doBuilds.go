@@ -90,7 +90,11 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 		artifactNames[artifact.Name] = artifactName
 
 		// Check if the artifact exists in the repository
-		exists := repoAdapter.ArtifactExists(artifactName)
+		exists, err := repoAdapter.ArtifactExists(artifactName)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
 		buildNeeded[artifact.Name] = force || !exists
 
 		// Display if build is needed

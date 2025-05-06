@@ -94,7 +94,10 @@ func runDeployAssets(cmd *cobra.Command, args []string) {
 		fmt.Printf("Found asset %s (%s)\n", asset.Name, asset.Filename)
 
 		// Check if the asset exists in the repository
-		exists := repoAdapter.ArtifactExists(asset.Filename)
+		exists, err := repoAdapter.ArtifactExists(asset.Filename)
+		if err != nil {
+			log.Fatalf("Failed to check if asset exists in repository: %v", err)
+		}
 		if !exists {
 			log.Fatalf("Asset %s not found in repository", asset.Filename)
 		}

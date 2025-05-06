@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"io"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ type RepositoryAdapter interface {
 	StoreArtifact(artifactPath, artifactName string) error
 
 	// ArtifactExists checks if an artifact exists in the repository
-	ArtifactExists(artifactName string) bool
+	ArtifactExists(artifactName string) (bool, error)
 
 	// RetrieveArtifact retrieves an artifact from the repository
 	RetrieveArtifact(artifactName, destinationPath string) error
@@ -116,10 +117,10 @@ func (l *LocalRepositoryAdapter) StoreArtifact(artifactPath, artifactName string
 }
 
 // ArtifactExists checks if an artifact exists in the local repository
-func (l *LocalRepositoryAdapter) ArtifactExists(artifactName string) bool {
+func (l *LocalRepositoryAdapter) ArtifactExists(artifactName string) (bool, error) {
 	artifactPath := filepath.Join(l.root, artifactName)
 	_, err := os.Stat(artifactPath)
-	return err == nil
+	return err == nil, nil
 }
 
 // RetrieveArtifact retrieves an artifact from the local repository
@@ -226,7 +227,7 @@ func (s *S3RepositoryAdapter) StoreArtifact(artifactPath, artifactName string) e
 }
 
 // ArtifactExists checks if an artifact exists in the S3 repository
-func (s *S3RepositoryAdapter) ArtifactExists(artifactName string) bool {
+func (s *S3RepositoryAdapter) ArtifactExists(artifactName string) (bool, error) {
 	// Create a context
 	ctx := context.Background()
 
@@ -236,7 +237,15 @@ func (s *S3RepositoryAdapter) ArtifactExists(artifactName string) bool {
 		Key:    aws.String(s.getObjectKey(artifactName)),
 	})
 
-	return err == nil
+	var notFound *types.NotFound
+	if errors.As(err, &notFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check if artifact exists in S3: %w", err)
+	}
+
+	return true, nil
 }
 
 // RetrieveArtifact retrieves an artifact from the S3 repository

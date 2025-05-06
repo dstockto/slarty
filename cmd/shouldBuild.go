@@ -79,7 +79,10 @@ func runShouldBuild(cmd *cobra.Command, args []string) {
 		}
 
 		// Check if the artifact exists in the repository
-		exists := repoAdapter.ArtifactExists(artifactName)
+		exists, err := repoAdapter.ArtifactExists(artifactName)
+		if err != nil {
+			log.Fatalln(err)
+		}
 		buildNeeded[artifact.Name] = !exists
 
 		// Track the longest name for formatting

@@ -86,7 +86,10 @@ func runDoDeploys(cmd *cobra.Command, args []string) {
 		artifactNames[artifact.Name] = artifactName
 
 		// Check if the artifact exists in the repository
-		exists := repoAdapter.ArtifactExists(artifactName)
+		exists, err := repoAdapter.ArtifactExists(artifactName)
+		if err != nil {
+			log.Fatalf("Failed to check if artifact exists in repository: %v", err)
+		}
 		if !exists {
 			log.Fatalf("Artifact %s for %s not found in repository", artifactName, artifact.Name)
 		}
