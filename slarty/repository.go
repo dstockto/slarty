@@ -58,9 +58,6 @@ func NewRepositoryAdapter(config *ArtifactsConfig, useLocal bool) (RepositoryAda
 		if bucketName == "" {
 			return nil, errors.New("S3 bucket name not specified")
 		}
-		if profile == "" {
-			profile = "default"
-		}
 
 		adapter, err := NewS3RepositoryAdapter(region, bucketName, pathPrefix, profile)
 		if err != nil {
@@ -175,10 +172,21 @@ func NewS3RepositoryAdapter(region, bucketName, pathPrefix, profile string) (*S3
 	ctx := context.Background()
 
 	// Load AWS configuration
-	cfg, err := config.LoadDefaultConfig(ctx,
+	//cfg, err := config.LoadDefaultConfig(ctx,
+	//	config.WithRegion(region),
+	//	config.WithSharedConfigProfile(profile),
+	//)
+
+	configurers := []func(*config.LoadOptions) error{
 		config.WithRegion(region),
-		config.WithSharedConfigProfile(profile),
-	)
+	}
+
+	if profile != "" {
+		configurers = append(configurers, config.WithSharedConfigProfile(profile))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, configurers...)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS configuration: %w", err)
 	}
