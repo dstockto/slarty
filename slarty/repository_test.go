@@ -57,13 +57,19 @@ func TestLocalRepositoryAdapter(t *testing.T) {
 
 	// Test ArtifactExists
 	t.Run("ArtifactExists", func(t *testing.T) {
+		// Create a test artifact file with content
+		err := os.WriteFile(filepath.Join(repoDir, "test-artifact.tar.gz"), artifactContent, 0644)
+		if err != nil {
+			t.Fatalf("Failed to create test artifact: %v", err)
+		}
+
 		// Test existing artifact
-		if !adapter.ArtifactExists("test-artifact.tar.gz") {
+		if exists, err := adapter.ArtifactExists("test-artifact.tar.gz"); !exists || err != nil {
 			t.Fatalf("ArtifactExists returned false for existing artifact")
 		}
 
 		// Test non-existing artifact
-		if adapter.ArtifactExists("non-existing-artifact.tar.gz") {
+		if exists, err := adapter.ArtifactExists("non-existing-artifact.tar.gz"); exists || err != nil {
 			t.Fatalf("ArtifactExists returned true for non-existing artifact")
 		}
 	})
@@ -107,12 +113,18 @@ func TestNewRepositoryAdapter(t *testing.T) {
 				Options: struct {
 					Root       string `json:"root"`
 					Region     string `json:"region"`
+					BucketName string `json:"bucket-name"`
+					PathPrefix string `json:"path-prefix"`
+					Profile    string `json:"profile"`
+				}(struct {
+					Root       string `json:"root"`
+					Region     string `json:"region"`
 					BucketName string `json:"bucket_name"`
 					PathPrefix string `json:"path_prefix"`
 					Profile    string `json:"profile"`
 				}{
 					Root: "/tmp/repo",
-				},
+				}),
 			},
 		}
 
@@ -133,12 +145,18 @@ func TestNewRepositoryAdapter(t *testing.T) {
 				Options: struct {
 					Root       string `json:"root"`
 					Region     string `json:"region"`
+					BucketName string `json:"bucket-name"`
+					PathPrefix string `json:"path-prefix"`
+					Profile    string `json:"profile"`
+				}(struct {
+					Root       string `json:"root"`
+					Region     string `json:"region"`
 					BucketName string `json:"bucket_name"`
 					PathPrefix string `json:"path_prefix"`
 					Profile    string `json:"profile"`
 				}{
 					Root: "/tmp/repo",
-				},
+				}),
 			},
 		}
 
@@ -163,13 +181,19 @@ func TestNewRepositoryAdapter(t *testing.T) {
 				Options: struct {
 					Root       string `json:"root"`
 					Region     string `json:"region"`
+					BucketName string `json:"bucket-name"`
+					PathPrefix string `json:"path-prefix"`
+					Profile    string `json:"profile"`
+				}(struct {
+					Root       string `json:"root"`
+					Region     string `json:"region"`
 					BucketName string `json:"bucket_name"`
 					PathPrefix string `json:"path_prefix"`
 					Profile    string `json:"profile"`
 				}{
 					Region:     "us-west-1",
 					BucketName: "test-bucket",
-				},
+				}),
 			},
 		}
 
@@ -200,14 +224,20 @@ func TestNewRepositoryAdapter(t *testing.T) {
 	t.Run("MissingRoot", func(t *testing.T) {
 		config := &ArtifactsConfig{
 			Repository: Repository{
-				Adapter: "Local",
-				Options: struct {
+				"Local",
+				struct {
+					Root       string `json:"root"`
+					Region     string `json:"region"`
+					BucketName string `json:"bucket-name"`
+					PathPrefix string `json:"path-prefix"`
+					Profile    string `json:"profile"`
+				}(struct {
 					Root       string `json:"root"`
 					Region     string `json:"region"`
 					BucketName string `json:"bucket_name"`
 					PathPrefix string `json:"path_prefix"`
 					Profile    string `json:"profile"`
-				}{},
+				}{}),
 			},
 		}
 

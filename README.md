@@ -258,6 +258,10 @@ If you run `slarty deploy-assets` and Slarty is unable to find one of the refere
 
 The `deploy-assets` command will create the output directory path if it does not exist. It will be relative to the configured "root_directory" configuration option at the root.
 
+### slarty do-cleanup
+
+The `do-cleanup` command is used to clear the deployment directories for your assets. The command accepts the `--config`, `--filter` and `--exclude` flags. The `--config` is to provide the path to the artifacts.json file. The command reads the configuration for any defined assets you've defined, and will delete the contents of the `deploy_location` directories as defined in `artifacts.json`. You can pass in the `--filter` command to limit the assets to only those that match the name provided. You can use the `--exclude` flag to remove assets that match the provided name from consideration. If neither `--filter`, nor `--exclude` is provided, the command will run against all defined assets. 
+
 ## Why Slarty?
 
 The name of Slarty comes from a character from The Hitchhiker's Guide to the Galaxy (HHGTTG). In the book, Slarti works for works on the planet Magrathea, as a designer of custom planets. His favorite part of the job is designing coastlines and he won an award for the fjords in Norway. For Slarti, planets are artifacts.
