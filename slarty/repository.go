@@ -117,7 +117,10 @@ func (l *LocalRepositoryAdapter) StoreArtifact(artifactPath, artifactName string
 func (l *LocalRepositoryAdapter) ArtifactExists(artifactName string) (bool, error) {
 	artifactPath := filepath.Join(l.root, artifactName)
 	_, err := os.Stat(artifactPath)
-	return err == nil, nil
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // RetrieveArtifact retrieves an artifact from the local repository
