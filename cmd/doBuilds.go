@@ -181,6 +181,13 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 		fmt.Printf("] %3d%%\n", int(float64(successfulBuilds)/float64(totalBuildsNeeded)*100))
 		fmt.Printf("-- Saved %s to repository.\n", artifactNames[artifact.Name])
 	}
+
+	if successfulBuilds != totalBuildsNeeded {
+		fmt.Printf("\nBuilds failed for %d/%d artifacts\n", totalBuildsNeeded-successfulBuilds, totalBuildsNeeded)
+		os.Exit(1)
+	} else {
+		fmt.Printf("\nBuilds succeeded for %d artifacts\n", successfulBuilds)
+	}
 }
 
 // zipDirectory archives the contents of a directory into a tar.gz file
