@@ -79,7 +79,7 @@ To use AWS S3 as a repository a few more options are required. Here's an example
 }
 ``` 
 
-Most of the values should be obvious what they are for. The path-prefix is the only optional value. If provided, it will result in the artifacts being placed in pseudo-directories on S3. It can be a good way to keep different applications' artifacts in the same bucket but keep them separated. You should have your AWS credentials in the `~/.aws/credentials` file of the user that will be running Slarty. The profile key is optional and will default to "default", but if you would like Slarty to use credentials from a different profile section in your credentials file, this is where to put that.
+Most of the values should be obvious what they are for. The path-prefix is the only optional value. If provided, it will result in the artifacts being placed in pseudo-directories on S3. It can be a good way to keep different applications' artifacts in the same bucket but keep them separated. Slarty does not accept AWS credentials in `artifacts.json`; it uses the standard AWS credential chain (environment variables, the `~/.aws/credentials` file, or an instance/role profile) of the user running Slarty. The profile key is optional, but if you would like Slarty to use credentials from a specific profile section in your credentials file, this is where to put that.
 
 ### Configuration - "artifacts" section
 
@@ -279,11 +279,10 @@ Below is a full example config for an app that has two separate builds and artif
     "repository": {
     "adapter": "s3",
     "options": {
-      "key": "AKABAKWAMBALAMBADOOP",
-      "secret": "I+Kn0wS0m3th1ngY0uD0n+tKN0W4Ab0UTtRY2GU355",
       "region": "us-east-1",
       "bucket-name": "example-app-artifacts",
-      "path-prefix": "Example/App"
+      "path-prefix": "Example/App",
+      "profile": "default (optional)"
     }
   },
 
