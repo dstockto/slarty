@@ -187,6 +187,13 @@ func extractTarFile(header *tar.Header, tarReader *tar.Reader, destDir string) e
 	// Prepare the destination path
 	destPath := filepath.Join(destDir, header.Name)
 
+	// Guard against path traversal (Zip Slip): a malicious archive entry such as
+	// "../../etc/cron.d/x" must not be allowed to write outside destDir.
+	rel, err := filepath.Rel(destDir, destPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("illegal path in archive: %s", header.Name)
+	}
+
 	// Handle different types of files
 	switch header.Typeflag {
 	case tar.TypeDir:
