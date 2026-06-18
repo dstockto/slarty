@@ -225,6 +225,8 @@ Beginning build for Services application
 
 If the `--force` option were provided in the example above, then all four builds would have executed and those artifacts would be stored in the repository.
 
+**Security note:** The `command` field for each artifact is run through a shell (`sh -c`) on whatever machine executes `do-builds`. That means anyone who can change `artifacts.json` can run arbitrary commands on your build server. Be careful where and when you run this command. See the [Security considerations](#security-considerations) section below for details.
+
 ### slarty do-deploys
 
 Like most of the commands above, the `do-deploys` command accepts the `[-c|--config]` and `[-f|--fiter]` options. The purpose of the `do-deploys` command is to identify the archives that match the current repository's code state, download those from the repository, and extract them into the `deploy_location` directory. If the archive cannot be found in the repository then it will be treated as a fatal error. This is to keep the steps of building and deploying strictly separated. Ideally, building happens on a Continuous Integration (CI) server while deployment would happen on the web or application server.
@@ -261,6 +263,20 @@ The `deploy-assets` command will create the output directory path if it does not
 ### slarty do-cleanup
 
 The `do-cleanup` command is used to clear the deployment directories for your assets. The command accepts the `--config`, `--filter` and `--exclude` flags. The `--config` is to provide the path to the artifacts.json file. The command reads the configuration for any defined assets you've defined, and will delete the contents of the `deploy_location` directories as defined in `artifacts.json`. You can pass in the `--filter` command to limit the assets to only those that match the name provided. You can use the `--exclude` flag to remove assets that match the provided name from consideration. If neither `--filter`, nor `--exclude` is provided, the command will run against all defined assets. 
+
+## Security considerations
+
+Slarty runs the `command` field from each artifact in `artifacts.json` through a shell (`sh -c`) on whatever machine executes `do-builds` — typically a CI or build server. This is by design, since the whole point of `do-builds` is to run your build commands for you. It does, however, create an important trust boundary worth understanding.
+
+Because `artifacts.json` lives in your repository, anyone who can modify that file — including via a pull request — can change the `command` field and have arbitrary commands run on your build server the next time `do-builds` executes. In other words, a change to `artifacts.json` is effectively a change to the code that runs on your build infrastructure.
+
+A few recommendations to keep this safe:
+
+* Only run `do-builds` on trusted code, such as branches that have already been reviewed and merged.
+* Treat any change to `artifacts.json` — and especially the `command` field — as security-sensitive, and review those changes as carefully as you would review code.
+* Avoid running `do-builds` automatically against untrusted or forked pull requests. If you need to validate builds for those, do so in an isolated, disposable environment that has no access to credentials or other sensitive resources.
+
+None of this is unique to Slarty; any tool that runs build commands defined in the repository has the same property. The goal here is simply to make the trust boundary explicit so you can decide where it's appropriate to run `do-builds`.
 
 ## Why Slarty?
 
