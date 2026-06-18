@@ -85,8 +85,8 @@ func runArtifactNames(cmd *cobra.Command, args []string) {
 	fmt.Fprintf(w, " %s \t %s \n", "Application", "Artifact Name")
 	fmt.Fprintf(w, separator)
 
-	for name := range artifactNames {
-		fmt.Fprintf(w, " "+name+"\t "+artifactNames[name]+"\n")
+	for _, artifact := range artifacts {
+		fmt.Fprintf(w, " "+artifact.Name+"\t "+artifactNames[artifact.Name]+"\n")
 	}
 
 	fmt.Fprintf(w, separator)

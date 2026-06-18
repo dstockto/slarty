@@ -41,6 +41,105 @@ func TestArtifactNamesCommandFlags(t *testing.T) {
 	}
 }
 
+func TestRunArtifactNamesPreservesConfigOrder(t *testing.T) {
+	// Regression test for non-deterministic table ordering: rows must appear in
+	// the same order as the artifacts are defined in the config, not in random
+	// map-iteration order. Several artifacts in non-alphabetical order make a
+	// regression (random ordering) reliably detectable.
+	tempDir, err := os.MkdirTemp("", "slarty-artifact-names-order-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	order := []string{"zebra", "apple", "mango", "delta", "kiwi", "bravo"}
+
+	var artifactsJSON strings.Builder
+	for i, name := range order {
+		if i > 0 {
+			artifactsJSON.WriteString(",")
+		}
+		artifactsJSON.WriteString(`{
+			"name": "` + name + `",
+			"directories": ["` + name + `"],
+			"command": "make ` + name + `",
+			"output_directory": "build/` + name + `",
+			"deploy_location": "deploy/` + name + `",
+			"artifact_prefix": "` + name + `"
+		}`)
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "__DIR__",
+		"repository": { "adapter": "Local", "options": { "root": "/tmp/repo" } },
+		"artifacts": [` + artifactsJSON.String() + `]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	// Initialize a git repository with a directory per artifact.
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tempDir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("git %v failed: %v", args, err)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	for _, name := range order {
+		dirPath := filepath.Join(tempDir, name)
+		if err := os.Mkdir(dirPath, 0755); err != nil {
+			t.Fatalf("Failed to create directory %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dirPath, "test.txt"), []byte(name), 0644); err != nil {
+			t.Fatalf("Failed to create file in %s: %v", name, err)
+		}
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "Initial commit")
+
+	oldArtifactsJson := artifactsJson
+	defer func() { artifactsJson = oldArtifactsJson }()
+	artifactsJson = configPath
+
+	oldFilter := filter
+	defer func() { filter = oldFilter }()
+	filter = ""
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	runArtifactNames(&cobra.Command{Use: "test"}, []string{})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	// Each name must appear, and in the configured order.
+	lastIdx := -1
+	for _, name := range order {
+		idx := strings.Index(output, name)
+		if idx == -1 {
+			t.Fatalf("Expected output to contain %q, got:\n%s", name, output)
+		}
+		if idx < lastIdx {
+			t.Errorf("Artifact %q appeared out of config order in output:\n%s", name, output)
+		}
+		lastIdx = idx
+	}
+}
+
 func TestRunArtifactNames(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "slarty-artifact-names-test")
