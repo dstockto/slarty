@@ -392,3 +392,92 @@ func TestRunDoCleanup(t *testing.T) {
 		}
 	})
 }
+
+func TestRunDoCleanupRefusesProjectRoot(t *testing.T) {
+	// Create a temporary directory to act as the project root.
+	tempDir, err := os.MkdirTemp("", "slarty-do-cleanup-root-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Place a sentinel file in the root that must survive cleanup.
+	sentinel := filepath.Join(tempDir, "sentinel.txt")
+	err = os.WriteFile(sentinel, []byte("do not delete me"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create sentinel file: %v", err)
+	}
+
+	// Create a test artifacts.json with an asset whose deploy_location is empty,
+	// which collapses to the project root via filepath.Join.
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": {
+			"adapter": "Local",
+			"options": {
+				"root": "` + tempDir + `/repo"
+			}
+		},
+		"assets": [
+			{
+				"name": "rootasset",
+				"filename": "root.tar.gz",
+				"deploy_location": ""
+			}
+		]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	err = os.WriteFile(configPath, []byte(jsonContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	cmd := &cobra.Command{
+		Use:   "test",
+		Short: "Test command",
+	}
+
+	// Save and restore globals around the run.
+	oldArtifactsJson := artifactsJson
+	defer func() { artifactsJson = oldArtifactsJson }()
+	artifactsJson = configPath
+
+	oldFilter := filter
+	defer func() { filter = oldFilter }()
+	filter = ""
+
+	oldExclude := exclude
+	defer func() { exclude = oldExclude }()
+	exclude = ""
+
+	// Capture stdout.
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	runDoCleanup(cmd, []string{})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	// The sentinel file in the project root must still exist.
+	if _, err := os.Stat(sentinel); os.IsNotExist(err) {
+		t.Errorf("Sentinel file %s was deleted; do-cleanup wiped the project root", sentinel)
+	}
+
+	// The artifacts.json must also survive (further proof the root wasn't wiped).
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Errorf("Config file %s was deleted; do-cleanup wiped the project root", configPath)
+	}
+
+	// Output should indicate the asset was refused/skipped.
+	if !strings.Contains(output, "Refusing to clean") {
+		t.Errorf("Expected output to indicate the asset was refused, got: %s", output)
+	}
+}

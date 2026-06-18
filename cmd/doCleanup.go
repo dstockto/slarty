@@ -123,8 +123,35 @@ func runDoCleanup(cmd *cobra.Command, args []string) {
 		// Get the full path to the deploy location
 		deployPath := filepath.Join(artifactConfig.RootDirectory, asset.DeployLocation)
 
+		// Guard against cleaning the project root itself. An empty or "."
+		// deploy_location causes filepath.Join to collapse to RootDirectory,
+		// which would otherwise wipe the entire project. Refuse to clean when
+		// the resolved deploy path is the project root or an ancestor of it.
+		deployAbs, err := filepath.Abs(deployPath)
+		if err != nil {
+			log.Fatalf("Failed to resolve deploy directory: %v", err)
+		}
+		deployAbs = filepath.Clean(deployAbs)
+
+		rootAbs, err := filepath.Abs(artifactConfig.RootDirectory)
+		if err != nil {
+			log.Fatalf("Failed to resolve root directory: %v", err)
+		}
+		rootAbs = filepath.Clean(rootAbs)
+
+		if deployAbs == rootAbs {
+			fmt.Printf(" - Refusing to clean %s: resolves to or contains the project root\n", deployPath)
+			continue
+		}
+		if rel, relErr := filepath.Rel(deployAbs, rootAbs); relErr == nil &&
+			rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+			// rootAbs is inside deployAbs, so deployPath is an ancestor of the root.
+			fmt.Printf(" - Refusing to clean %s: resolves to or contains the project root\n", deployPath)
+			continue
+		}
+
 		// Check if the directory exists
-		_, err := os.Stat(deployPath)
+		_, err = os.Stat(deployPath)
 		if os.IsNotExist(err) {
 			fmt.Printf(" - Directory does not exist: %s\n", deployPath)
 			continue
