@@ -82,8 +82,8 @@ func runHashApplication(cmd *cobra.Command, args []string) {
 	fmt.Fprintf(w, " %s \t %s \n", "Application", "Hash")
 	fmt.Fprintf(w, separator)
 
-	for name := range artifactHashes {
-		fmt.Fprintf(w, " "+name+"\t "+artifactHashes[name]+"\n")
+	for _, artifact := range artifacts {
+		fmt.Fprintf(w, " "+artifact.Name+"\t "+artifactHashes[artifact.Name]+"\n")
 	}
 
 	fmt.Fprintf(w, separator)
