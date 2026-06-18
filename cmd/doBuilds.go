@@ -35,7 +35,10 @@ import (
 	"strings"
 )
 
-var force bool
+var (
+	force    bool
+	failFast bool
+)
 
 // doBuildsCmd represents the doBuilds command
 var doBuildsCmd = &cobra.Command{
@@ -44,7 +47,9 @@ var doBuildsCmd = &cobra.Command{
 	Long: `Builds artifacts that don't exist in the repository.
 If an artifact already exists in the repository, it will not be built unless the --force flag is used.
 The command will execute the build command for each artifact, archive the output directory,
-and store the artifact in the repository.`,
+and store the artifact in the repository.
+By default it attempts every build and reports which ones failed at the end; use --fail-fast
+to stop after the first failure.`,
 	Run: runDoBuilds,
 }
 
@@ -75,6 +80,17 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Execute the builds; exit non-zero if any failed.
+	if failed := executeBuilds(artifacts, artifactConfig, repoAdapter); len(failed) > 0 {
+		os.Exit(1)
+	}
+}
+
+// executeBuilds determines which artifacts need building, runs the builds, and
+// stores the results in the repository. It prints progress and a final summary,
+// and returns the names of any artifacts that failed to build. It does not call
+// os.Exit so it can be exercised by tests.
+func executeBuilds(artifacts []slarty.ArtifactConfig, artifactConfig *slarty.ArtifactsConfig, repoAdapter slarty.RepositoryAdapter) []string {
 	// Track which artifacts need to be built
 	buildNeeded := make(map[string]bool)
 	artifactNames := make(map[string]string)
@@ -105,16 +121,16 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 		fmt.Printf("Doing build for %s - %s\n", artifact.Name, buildStatus)
 	}
 
-	// Count of successful builds
-	successfulBuilds := 0
-	totalBuildsNeeded := 0
-
 	// Count how many builds are needed
+	totalBuildsNeeded := 0
 	for _, artifact := range artifacts {
 		if buildNeeded[artifact.Name] {
 			totalBuildsNeeded++
 		}
 	}
+
+	successfulBuilds := 0
+	var failedBuilds []string
 
 	// Execute builds for artifacts that need it
 	for _, artifact := range artifacts {
@@ -125,47 +141,15 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 		fmt.Printf("\nBeginning build for %s application\n", artifact.Name)
 		fmt.Println(strings.Repeat("-", 40+len(artifact.Name)))
 
-		// Execute the build command
-		cmd := exec.Command("sh", "-c", artifact.Command)
-		cmd.Dir = artifactConfig.RootDirectory
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		err := cmd.Run()
-		if err != nil {
+		if err := buildAndStoreArtifact(artifact, artifactConfig, repoAdapter, artifactNames[artifact.Name]); err != nil {
 			fmt.Printf("Build failed for %s: %v\n", artifact.Name, err)
+			failedBuilds = append(failedBuilds, artifact.Name)
+			if failFast {
+				fmt.Println("\n-- Stopping early because --fail-fast is set")
+				break
+			}
 			continue
 		}
-
-		fmt.Printf("\n Build succeeded for %s\n", artifact.Name)
-
-		// Create a temporary tar.gz file
-		tempTarGzFile, err := os.CreateTemp("", "slarty-*.tar.gz")
-		if err != nil {
-			fmt.Printf("Failed to create temporary tar.gz file: %v\n", err)
-			continue
-		}
-		tempTarGzPath := tempTarGzFile.Name()
-		tempTarGzFile.Close() // Close the file so we can reopen it for archiving
-
-		// Archive the output directory
-		err = createTarGz(filepath.Join(artifactConfig.RootDirectory, artifact.OutputDirectory), tempTarGzPath)
-		if err != nil {
-			fmt.Printf("Failed to archive output directory: %v\n", err)
-			os.Remove(tempTarGzPath)
-			continue
-		}
-
-		// Store the artifact in the repository
-		err = repoAdapter.StoreArtifact(tempTarGzPath, artifactNames[artifact.Name])
-		if err != nil {
-			fmt.Printf("Failed to store artifact in repository: %v\n", err)
-			os.Remove(tempTarGzPath)
-			continue
-		}
-
-		// Clean up the temporary tar.gz file
-		os.Remove(tempTarGzPath)
 
 		successfulBuilds++
 
@@ -182,12 +166,54 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 		fmt.Printf("-- Saved %s to repository.\n", artifactNames[artifact.Name])
 	}
 
-	if successfulBuilds != totalBuildsNeeded {
-		fmt.Printf("\nBuilds failed for %d/%d artifacts\n", totalBuildsNeeded-successfulBuilds, totalBuildsNeeded)
-		os.Exit(1)
+	// Print a summary, listing exactly which builds failed.
+	if len(failedBuilds) > 0 {
+		fmt.Printf("\nBuilds failed for %d/%d artifacts:\n", len(failedBuilds), totalBuildsNeeded)
+		for _, name := range failedBuilds {
+			fmt.Printf(" - %s\n", name)
+		}
 	} else {
 		fmt.Printf("\nBuilds succeeded for %d artifacts\n", successfulBuilds)
 	}
+
+	return failedBuilds
+}
+
+// buildAndStoreArtifact runs an artifact's build command, archives its output
+// directory into a tar.gz, and stores the result in the repository.
+func buildAndStoreArtifact(artifact slarty.ArtifactConfig, artifactConfig *slarty.ArtifactsConfig, repoAdapter slarty.RepositoryAdapter, artifactName string) error {
+	// Execute the build command
+	cmd := exec.Command("sh", "-c", artifact.Command)
+	cmd.Dir = artifactConfig.RootDirectory
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build command failed: %w", err)
+	}
+
+	fmt.Printf("\n Build succeeded for %s\n", artifact.Name)
+
+	// Create a temporary tar.gz file
+	tempTarGzFile, err := os.CreateTemp("", "slarty-*.tar.gz")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary tar.gz file: %w", err)
+	}
+	tempTarGzPath := tempTarGzFile.Name()
+	tempTarGzFile.Close() // Close the file so we can reopen it for archiving
+	defer os.Remove(tempTarGzPath)
+
+	// Archive the output directory
+	if err := createTarGz(filepath.Join(artifactConfig.RootDirectory, artifact.OutputDirectory), tempTarGzPath); err != nil {
+		return fmt.Errorf("failed to archive output directory: %w", err)
+	}
+
+	// Store the artifact in the repository
+	if err := repoAdapter.StoreArtifact(tempTarGzPath, artifactName); err != nil {
+		return fmt.Errorf("failed to store artifact in repository: %w", err)
+	}
+
+	return nil
 }
 
 // createTarGz archives the contents of a directory into a tar.gz file
@@ -271,4 +297,5 @@ func init() {
 	// Here you will define your flags and configuration settings.
 	doBuildsCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"application1,application2\"")
 	doBuildsCmd.Flags().BoolVarP(&force, "force", "", false, "Force build even if artifact exists")
+	doBuildsCmd.Flags().BoolVar(&failFast, "fail-fast", false, "Stop after the first failed build")
 }
