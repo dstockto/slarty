@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dstockto/slarty/slarty"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +44,150 @@ func TestDoBuildsCommandFlags(t *testing.T) {
 	// Check force flag
 	if flags.Lookup("force") == nil {
 		t.Error("do-builds command should have 'force' flag")
+	}
+
+	// Check fail-fast flag
+	if flags.Lookup("fail-fast") == nil {
+		t.Error("do-builds command should have 'fail-fast' flag")
+	}
+}
+
+// buildTestSetup creates a temporary git repo with the given artifacts JSON
+// fragment and the given (root-relative) directories, then returns a config and
+// a local repository adapter ready for executeBuilds. The temp dir is cleaned up
+// automatically.
+func buildTestSetup(t *testing.T, artifactsJSON string, dirs []string) (*slarty.ArtifactsConfig, slarty.RepositoryAdapter) {
+	t.Helper()
+
+	tempDir, err := os.MkdirTemp("", "slarty-do-builds-fail-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	repoDir := filepath.Join(tempDir, "repo")
+	if err := os.Mkdir(repoDir, 0755); err != nil {
+		t.Fatalf("Failed to create repo directory: %v", err)
+	}
+
+	for _, d := range dirs {
+		full := filepath.Join(tempDir, d)
+		if err := os.MkdirAll(full, 0755); err != nil {
+			t.Fatalf("Failed to create dir %s: %v", d, err)
+		}
+		if err := os.WriteFile(filepath.Join(full, "f.txt"), []byte(d), 0644); err != nil {
+			t.Fatalf("Failed to write file in %s: %v", d, err)
+		}
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": { "adapter": "Local", "options": { "root": "` + repoDir + `" } },
+		"artifacts": [` + artifactsJSON + `]
+	}`
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	runGit := func(args ...string) {
+		c := exec.Command("git", args...)
+		c.Dir = tempDir
+		if err := c.Run(); err != nil {
+			t.Fatalf("git %v failed: %v", args, err)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	runGit("add", ".")
+	runGit("commit", "-m", "Initial commit")
+
+	config, err := slarty.ReadArtifactsJson(configPath)
+	if err != nil {
+		t.Fatalf("Failed to read config: %v", err)
+	}
+	repo, err := slarty.NewRepositoryAdapter(config, true)
+	if err != nil {
+		t.Fatalf("Failed to create repository adapter: %v", err)
+	}
+	return config, repo
+}
+
+// captureExecuteBuilds runs executeBuilds with stdout captured, returning the
+// failed-artifact slice and the captured output.
+func captureExecuteBuilds(t *testing.T, config *slarty.ArtifactsConfig, repo slarty.RepositoryAdapter) ([]string, string) {
+	t.Helper()
+	artifacts := config.GetByArtifactsByNameWithFilter(nil)
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	failed := executeBuilds(artifacts, config, repo)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return failed, buf.String()
+}
+
+func TestExecuteBuildsReportsFailures(t *testing.T) {
+	artifacts := `
+		{ "name": "good", "directories": ["src/good"], "command": "echo built", "output_directory": "build/good", "deploy_location": "deploy/good", "artifact_prefix": "good" },
+		{ "name": "bad", "directories": ["src/bad"], "command": "exit 1", "output_directory": "build/bad", "deploy_location": "deploy/bad", "artifact_prefix": "bad" }`
+	config, repo := buildTestSetup(t, artifacts, []string{"src/good", "src/bad", "build/good", "build/bad"})
+
+	oldForce, oldFailFast := force, failFast
+	defer func() { force, failFast = oldForce, oldFailFast }()
+	force = true // build regardless of repo state
+	failFast = false
+
+	failed, output := captureExecuteBuilds(t, config, repo)
+
+	if len(failed) != 1 || failed[0] != "bad" {
+		t.Fatalf("Expected failed=[bad], got %v", failed)
+	}
+	if !strings.Contains(output, "Build failed for bad") {
+		t.Errorf("Expected failure message for bad, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Builds failed for 1/2 artifacts:") {
+		t.Errorf("Expected failure summary, got:\n%s", output)
+	}
+	if !strings.Contains(output, "- bad") {
+		t.Errorf("Expected summary to list bad, got:\n%s", output)
+	}
+	// The good artifact should still have been built and stored despite bad failing.
+	if !strings.Contains(output, "Build succeeded for good") {
+		t.Errorf("Expected good to build, got:\n%s", output)
+	}
+}
+
+func TestExecuteBuildsFailFastStopsEarly(t *testing.T) {
+	artifacts := `
+		{ "name": "bad1", "directories": ["src/bad1"], "command": "exit 1", "output_directory": "build/bad1", "deploy_location": "d/bad1", "artifact_prefix": "bad1" },
+		{ "name": "bad2", "directories": ["src/bad2"], "command": "echo SHOULD_NOT_RUN_BAD2", "output_directory": "build/bad2", "deploy_location": "d/bad2", "artifact_prefix": "bad2" }`
+	config, repo := buildTestSetup(t, artifacts, []string{"src/bad1", "src/bad2", "build/bad1", "build/bad2"})
+
+	oldForce, oldFailFast := force, failFast
+	defer func() { force, failFast = oldForce, oldFailFast }()
+	force = true
+	failFast = true
+
+	failed, output := captureExecuteBuilds(t, config, repo)
+
+	if len(failed) != 1 || failed[0] != "bad1" {
+		t.Fatalf("Expected failed=[bad1] with fail-fast, got %v", failed)
+	}
+	if !strings.Contains(output, "Stopping early because --fail-fast is set") {
+		t.Errorf("Expected fail-fast notice, got:\n%s", output)
+	}
+	// The second artifact must never have started building.
+	if strings.Contains(output, "Beginning build for bad2") || strings.Contains(output, "SHOULD_NOT_RUN_BAD2") {
+		t.Errorf("fail-fast did not stop before bad2, got:\n%s", output)
 	}
 }
 
