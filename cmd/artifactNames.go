@@ -22,6 +22,7 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/dstockto/slarty/slarty"
 	"github.com/spf13/cobra"
@@ -74,6 +75,26 @@ func runArtifactNames(cmd *cobra.Command, args []string) {
 		artifactNames[artifact.Name] = filename
 	}
 
+	if jsonOutput {
+		type artifactNameEntry struct {
+			Application  string `json:"application"`
+			ArtifactName string `json:"artifact_name"`
+		}
+		entries := make([]artifactNameEntry, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			entries = append(entries, artifactNameEntry{
+				Application:  artifact.Name,
+				ArtifactName: artifactNames[artifact.Name],
+			})
+		}
+		out, err := json.MarshalIndent(entries, "", "  ")
+		if err != nil {
+			log.Fatalln(err)
+		}
+		fmt.Println(string(out))
+		return
+	}
+
 	if longestName == 0 {
 		fmt.Println("No artifacts found")
 		return
@@ -99,6 +120,7 @@ func init() {
 
 	// Here you will define your flags and configuration settings.
 	artifactNamesCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"application1,application2\"")
+	artifactNamesCmd.Flags().BoolVar(&jsonOutput, "json", false, "output results as JSON")
 	// Cobra supports Persistent Flags which will work for this command
 	// and all subcommands, e.g.:
 	// artifactNamesCmd.PersistentFlags().String("foo", "", "A help for foo")

@@ -28,6 +28,7 @@ var (
 	artifactsJson string
 	filter        string
 	local         bool
+	jsonOutput    bool
 )
 
 // rootCmd represents the base command when called without any subcommands

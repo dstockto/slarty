@@ -22,6 +22,7 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/dstockto/slarty/slarty"
 	"github.com/spf13/cobra"
@@ -91,6 +92,26 @@ func runShouldBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	if jsonOutput {
+		type buildNeededEntry struct {
+			Application string `json:"application"`
+			BuildNeeded bool   `json:"build_needed"`
+		}
+		entries := make([]buildNeededEntry, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			entries = append(entries, buildNeededEntry{
+				Application: artifact.Name,
+				BuildNeeded: buildNeeded[artifact.Name],
+			})
+		}
+		out, err := json.MarshalIndent(entries, "", "  ")
+		if err != nil {
+			log.Fatalln(err)
+		}
+		fmt.Println(string(out))
+		return
+	}
+
 	if len(artifacts) == 0 {
 		fmt.Println("No artifacts found")
 		return
@@ -125,4 +146,5 @@ func init() {
 
 	// Here you will define your flags and configuration settings.
 	shouldBuildCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"application1,application2\"")
+	shouldBuildCmd.Flags().BoolVar(&jsonOutput, "json", false, "output results as JSON")
 }
