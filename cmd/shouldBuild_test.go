@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -40,6 +41,180 @@ func TestShouldBuildCommandFlags(t *testing.T) {
 	if flags.Lookup("filter") == nil {
 		t.Error("should-build command should have 'filter' flag")
 	}
+
+	// Check json flag
+	if flags.Lookup("json") == nil {
+		t.Error("should-build command should have 'json' flag")
+	}
+}
+
+func TestRunShouldBuildJSON(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "slarty-should-build-json-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	repoDir := filepath.Join(tempDir, "repo")
+	if err := os.Mkdir(repoDir, 0755); err != nil {
+		t.Fatalf("Failed to create repository directory: %v", err)
+	}
+
+	// zebra exists in the repo (no build needed), apple and mango do not.
+	order := []string{"zebra", "apple", "mango"}
+
+	var artifactsJSON strings.Builder
+	for i, name := range order {
+		if i > 0 {
+			artifactsJSON.WriteString(",")
+		}
+		artifactsJSON.WriteString(`{
+			"name": "` + name + `",
+			"directories": ["` + name + `"],
+			"command": "make ` + name + `",
+			"output_directory": "build/` + name + `",
+			"deploy_location": "deploy/` + name + `",
+			"artifact_prefix": "` + name + `"
+		}`)
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "__DIR__",
+		"repository": { "adapter": "Local", "options": { "root": "` + repoDir + `" } },
+		"artifacts": [` + artifactsJSON.String() + `]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tempDir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("git %v failed: %v", args, err)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	for _, name := range order {
+		dirPath := filepath.Join(tempDir, name)
+		if err := os.Mkdir(dirPath, 0755); err != nil {
+			t.Fatalf("Failed to create directory %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dirPath, "test.txt"), []byte(name), 0644); err != nil {
+			t.Fatalf("Failed to create file in %s: %v", name, err)
+		}
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "Initial commit")
+
+	// Make zebra's artifact already exist in the repo.
+	artifactConfig, err := slarty.ReadArtifactsJson(configPath)
+	if err != nil {
+		t.Fatalf("Failed to read artifacts.json: %v", err)
+	}
+	zebraName, err := slarty.GetArtifactName("zebra", artifactConfig)
+	if err != nil {
+		t.Fatalf("Failed to get artifact name for zebra: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, zebraName), []byte("artifact"), 0644); err != nil {
+		t.Fatalf("Failed to create artifact file: %v", err)
+	}
+
+	oldArtifactsJson := artifactsJson
+	defer func() { artifactsJson = oldArtifactsJson }()
+	artifactsJson = configPath
+
+	oldFilter := filter
+	defer func() { filter = oldFilter }()
+	filter = ""
+
+	oldLocal := local
+	defer func() { local = oldLocal }()
+	local = true
+
+	oldJSON := jsonOutput
+	defer func() { jsonOutput = oldJSON }()
+
+	type entry struct {
+		Application string `json:"application"`
+		BuildNeeded bool   `json:"build_needed"`
+	}
+
+	t.Run("ValidJSONInConfigOrder", func(t *testing.T) {
+		jsonOutput = true
+		defer func() { jsonOutput = false }()
+
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		runShouldBuild(&cobra.Command{Use: "test"}, []string{})
+
+		w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+
+		var entries []entry
+		if err := json.Unmarshal(buf.Bytes(), &entries); err != nil {
+			t.Fatalf("Output is not valid JSON: %v\nOutput: %s", err, buf.String())
+		}
+
+		if len(entries) != len(order) {
+			t.Fatalf("Expected %d entries, got %d: %s", len(order), len(entries), buf.String())
+		}
+		for i, name := range order {
+			if entries[i].Application != name {
+				t.Errorf("Entry %d: expected application %q, got %q", i, name, entries[i].Application)
+			}
+		}
+		// zebra exists -> no build needed; others do not -> build needed.
+		if entries[0].BuildNeeded {
+			t.Errorf("Expected zebra build_needed to be false, got true")
+		}
+		if !entries[1].BuildNeeded || !entries[2].BuildNeeded {
+			t.Errorf("Expected apple and mango build_needed to be true, got %+v", entries)
+		}
+	})
+
+	t.Run("EmptyArrayWhenNoArtifacts", func(t *testing.T) {
+		jsonOutput = true
+		oldF := filter
+		filter = "non-existent"
+		defer func() {
+			jsonOutput = false
+			filter = oldF
+		}()
+
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		runShouldBuild(&cobra.Command{Use: "test"}, []string{})
+
+		w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+
+		var entries []entry
+		if err := json.Unmarshal(buf.Bytes(), &entries); err != nil {
+			t.Fatalf("Output is not valid JSON: %v\nOutput: %s", err, buf.String())
+		}
+		if len(entries) != 0 {
+			t.Errorf("Expected empty array, got %d entries: %s", len(entries), buf.String())
+		}
+		if strings.Contains(buf.String(), "No artifacts found") {
+			t.Errorf("JSON mode should not print 'No artifacts found', got: %s", buf.String())
+		}
+	})
 }
 
 func TestRunShouldBuild(t *testing.T) {

@@ -22,6 +22,7 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/dstockto/slarty/slarty"
 	"github.com/spf13/cobra"
@@ -71,6 +72,26 @@ func runHashApplication(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	if jsonOutput {
+		type artifactHashEntry struct {
+			Application string `json:"application"`
+			Hash        string `json:"hash"`
+		}
+		entries := make([]artifactHashEntry, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			entries = append(entries, artifactHashEntry{
+				Application: artifact.Name,
+				Hash:        artifactHashes[artifact.Name],
+			})
+		}
+		out, err := json.MarshalIndent(entries, "", "  ")
+		if err != nil {
+			log.Fatalln(err)
+		}
+		fmt.Println(string(out))
+		return
+	}
+
 	if longestName == 0 {
 		fmt.Println("No artifacts found")
 		return
@@ -101,6 +122,7 @@ func init() {
 	// and all subcommands, e.g.:
 	// hashApplicationCmd.PersistentFlags().String("foo", "", "A help for foo")
 	hashApplicationCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"application1,application2\"")
+	hashApplicationCmd.Flags().BoolVar(&jsonOutput, "json", false, "output results as JSON")
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	// hashApplicationCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
