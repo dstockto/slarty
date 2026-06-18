@@ -34,6 +34,19 @@ import (
 	"strings"
 )
 
+// maxDecompressedFileBytes caps the number of bytes extracted for any single
+// archive entry. It guards against decompression bombs that could otherwise
+// fill the disk. The limit is intentionally generous (5 GiB) so legitimate
+// large artifacts are unaffected; tune this constant if larger entries are
+// expected.
+const maxDecompressedFileBytes = 5 << 30 // 5 GiB
+
+// maxDecompressedFileBytesForTest holds the effective per-entry cap. It is
+// seeded from maxDecompressedFileBytes and exists as a variable only so tests
+// can lower the limit without writing gigabytes of data. Production code never
+// reassigns it.
+var maxDecompressedFileBytesForTest int64 = maxDecompressedFileBytes
+
 // doDeploysCmd represents the doDeploys command
 var doDeploysCmd = &cobra.Command{
 	Use:   "do-deploys",
@@ -209,17 +222,25 @@ func extractTarFile(header *tar.Header, tarReader *tar.Reader, destDir string) e
 			return fmt.Errorf("failed to create directory for file: %w", err)
 		}
 
-		// Create the destination file
-		destFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(header.Mode))
+		// Create the destination file. Mask the header mode to 0o777 so a
+		// malicious archive cannot set setuid/setgid/sticky or other special
+		// bits (those live above 0o777) on extracted files.
+		destFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(header.Mode&0o777))
 		if err != nil {
 			return fmt.Errorf("failed to create destination file: %w", err)
 		}
 		defer destFile.Close()
 
-		// Copy the file contents
-		_, err = io.Copy(destFile, tarReader)
-		if err != nil {
+		// Copy the file contents, bounding the amount written per entry to
+		// guard against decompression bombs. io.CopyN with a limit one byte
+		// over the cap lets us detect an entry that exceeds the cap.
+		limit := maxDecompressedFileBytesForTest
+		written, err := io.CopyN(destFile, tarReader, limit+1)
+		if err != nil && err != io.EOF {
 			return fmt.Errorf("failed to copy file contents: %w", err)
+		}
+		if written > limit {
+			return fmt.Errorf("file %s in archive exceeds max size", header.Name)
 		}
 	default:
 		// Skip other types of files (symlinks, etc.)

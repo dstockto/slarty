@@ -9,11 +9,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
+
+// s3OperationTimeout bounds how long any single S3 operation may run. It is
+// intentionally generous to accommodate large artifact transfers while still
+// preventing an operation from hanging indefinitely.
+const s3OperationTimeout = 30 * time.Minute
 
 // RepositoryAdapter defines the interface for repository adapters
 type RepositoryAdapter interface {
@@ -221,8 +227,9 @@ func (s *S3RepositoryAdapter) StoreArtifact(artifactPath, artifactName string) e
 	}
 	defer file.Close()
 
-	// Create a context
-	ctx := context.Background()
+	// Create a context with a generous timeout
+	ctx, cancel := context.WithTimeout(context.Background(), s3OperationTimeout)
+	defer cancel()
 
 	// Upload the file to S3
 	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
@@ -239,8 +246,9 @@ func (s *S3RepositoryAdapter) StoreArtifact(artifactPath, artifactName string) e
 
 // ArtifactExists checks if an artifact exists in the S3 repository
 func (s *S3RepositoryAdapter) ArtifactExists(artifactName string) (bool, error) {
-	// Create a context
-	ctx := context.Background()
+	// Create a context with a generous timeout
+	ctx, cancel := context.WithTimeout(context.Background(), s3OperationTimeout)
+	defer cancel()
 
 	// Check if the object exists in S3
 	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
@@ -261,8 +269,9 @@ func (s *S3RepositoryAdapter) ArtifactExists(artifactName string) (bool, error) 
 
 // RetrieveArtifact retrieves an artifact from the S3 repository
 func (s *S3RepositoryAdapter) RetrieveArtifact(artifactName, destinationPath string) error {
-	// Create a context
-	ctx := context.Background()
+	// Create a context with a generous timeout
+	ctx, cancel := context.WithTimeout(context.Background(), s3OperationTimeout)
+	defer cancel()
 
 	// Get the object from S3
 	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{

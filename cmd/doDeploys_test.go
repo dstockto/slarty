@@ -189,6 +189,116 @@ func TestExtractTarGzRejectsPathTraversal(t *testing.T) {
 	}
 }
 
+func TestExtractTarGzMasksSpecialModeBits(t *testing.T) {
+	// A malicious archive must not be able to set setuid/setgid/sticky bits on
+	// extracted files; extraction must mask the header mode down to 0o777.
+	tempDir, err := os.MkdirTemp("", "slarty-mode-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tarGzPath := filepath.Join(tempDir, "setuid.tar.gz")
+	f, err := os.Create(tarGzPath)
+	if err != nil {
+		t.Fatalf("Failed to create tar.gz: %v", err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+	payload := []byte("payload")
+	// Mode includes the setuid bit (0o4000) plus rwxr-xr-x.
+	hdr := &tar.Header{
+		Name:     "evil",
+		Mode:     0o4755,
+		Size:     int64(len(payload)),
+		Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("Failed to write tar header: %v", err)
+	}
+	if _, err := tw.Write(payload); err != nil {
+		t.Fatalf("Failed to write tar payload: %v", err)
+	}
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	destDir := filepath.Join(tempDir, "dest")
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		t.Fatalf("Failed to create dest directory: %v", err)
+	}
+
+	if err := extractTarGz(tarGzPath, destDir); err != nil {
+		t.Fatalf("extractTarGz failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(destDir, "evil"))
+	if err != nil {
+		t.Fatalf("Failed to stat extracted file: %v", err)
+	}
+	// The mode (including special bits, after umask) must not retain setuid.
+	if info.Mode()&os.ModeSetuid != 0 {
+		t.Errorf("extracted file retained setuid bit: mode %v", info.Mode())
+	}
+	if perm := info.Mode().Perm(); perm&^0o777 != 0 {
+		t.Errorf("extracted file has bits above 0o777: mode %v", info.Mode())
+	}
+}
+
+func TestExtractTarGzRejectsOversizedEntry(t *testing.T) {
+	// An entry that streams more than maxDecompressedFileBytes must be
+	// rejected. To keep the test fast we reduce the limit temporarily rather
+	// than writing gigabytes; the data written stays just over the lowered cap.
+	tempDir, err := os.MkdirTemp("", "slarty-bomb-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tarGzPath := filepath.Join(tempDir, "bomb.tar.gz")
+	f, err := os.Create(tarGzPath)
+	if err != nil {
+		t.Fatalf("Failed to create tar.gz: %v", err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+	// Write more bytes than the (lowered) limit we set below.
+	payload := bytes.Repeat([]byte("A"), 2048)
+	hdr := &tar.Header{
+		Name:     "big.bin",
+		Mode:     0o644,
+		Size:     int64(len(payload)),
+		Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("Failed to write tar header: %v", err)
+	}
+	if _, err := tw.Write(payload); err != nil {
+		t.Fatalf("Failed to write tar payload: %v", err)
+	}
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	// Temporarily lower the cap so we exceed it with a tiny payload.
+	old := maxDecompressedFileBytesForTest
+	maxDecompressedFileBytesForTest = 1024
+	defer func() { maxDecompressedFileBytesForTest = old }()
+
+	destDir := filepath.Join(tempDir, "dest")
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		t.Fatalf("Failed to create dest directory: %v", err)
+	}
+
+	err = extractTarGz(tarGzPath, destDir)
+	if err == nil {
+		t.Fatal("expected extractTarGz to reject oversized entry, got nil error")
+	}
+	if !strings.Contains(err.Error(), "exceeds max size") {
+		t.Errorf("expected exceeds-max-size error, got: %v", err)
+	}
+}
+
 func TestExtractFile(t *testing.T) {
 	// This is a more focused test of the extractFile function
 	// Since extractFile is not exported, we test it indirectly through extractTarGz

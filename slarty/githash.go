@@ -34,11 +34,9 @@ func HashDirectories(root string, directories []string) (string, error) {
 
 	var out bytes.Buffer
 	var stderr bytes.Buffer
-	cmd := exec.Command("git")
+	args := append([]string{"ls-files", "-s"}, directories...)
+	cmd := exec.Command("git", args...)
 	cmd.Dir = rootDir
-	args := []string{"git", "ls-files", "-s"}
-	args = append(args, directories...)
-	cmd.Args = args
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 	err = cmd.Run()
