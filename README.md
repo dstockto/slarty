@@ -196,7 +196,7 @@ In the example above, the artifacts for the `Models` and `AMess` applications al
 
 ### slarty do-builds
 
-The `do-builds` command, like most above also accepts the `[-c|--config]` and `[-f|--filter]`. It also accepts a `--force` option. Running `do-builds` will determine the name of the artifact that should result from a build. If it exists in the repo, then it will not be executed. If it does not exist, then the `command` part of the artifacts configuration will be executed. Once the build succeeds, the archive will be created by zipping the `output_directory` into an archive named like what you'd see in the `artifact-names` command. It then stores that archive in the repository.
+The `do-builds` command, like most above also accepts the `[-c|--config]` and `[-f|--filter]`. It also accepts a `--force` option. Running `do-builds` will determine the name of the artifact that should result from a build. If it exists in the repo, then it will not be executed. If it does not exist, then the `command` part of the artifacts configuration will be executed. Once the build succeeds, the archive will be created as a tar.gz of the `output_directory`, named like what you'd see in the `artifact-names` command. It then stores that archive in the repository.
 
 If you provide the `--force` option, then it will not check if the archive exists in the repository. It will build and store the result in the repository which means if it did exist, it will be overwritten. If the build process changed but the code did not, this would be a good way to ensure that the proper artifact archive is what is stored in the repo.
 
