@@ -101,6 +101,33 @@ func TestGetArtifactName(t *testing.T) {
 	}
 }
 
+// TestHashDirectoriesSurfacesGitStderr verifies that when a git command
+// fails (e.g. the directory is not a git repository), the captured stderr
+// is surfaced in the returned error rather than swallowed.
+func TestHashDirectoriesSurfacesGitStderr(t *testing.T) {
+	// Skip this test if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available, skipping test")
+	}
+
+	// Create a temporary directory that is NOT a git repository.
+	tempDir, err := os.MkdirTemp("", "slarty-stderr-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	_, err = HashDirectories(tempDir, []string{"."})
+	if err == nil {
+		t.Fatalf("HashDirectories did not fail for a non-git directory")
+	}
+
+	// The git stderr text should be surfaced in the error message.
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("Expected error to contain git stderr 'not a git repository', got: %v", err)
+	}
+}
+
 // TestHashDirectories tests the HashDirectories function
 // Note: This test requires git to be installed and a git repository to be present
 func TestHashDirectories(t *testing.T) {
