@@ -127,7 +127,7 @@ func runDeployAssets(cmd *cobra.Command, args []string) {
 		}
 
 		// Extract the asset to the deploy location
-		err = unzipFile(tempFilePath, deployPath)
+		err = extractTarGz(tempFilePath, deployPath)
 		if err != nil {
 			os.Remove(tempFilePath)
 			log.Fatalf("Failed to extract asset: %v", err)

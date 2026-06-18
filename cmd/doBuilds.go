@@ -149,7 +149,7 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 		tempTarGzFile.Close() // Close the file so we can reopen it for archiving
 
 		// Archive the output directory
-		err = zipDirectory(filepath.Join(artifactConfig.RootDirectory, artifact.OutputDirectory), tempTarGzPath)
+		err = createTarGz(filepath.Join(artifactConfig.RootDirectory, artifact.OutputDirectory), tempTarGzPath)
 		if err != nil {
 			fmt.Printf("Failed to archive output directory: %v\n", err)
 			os.Remove(tempTarGzPath)
@@ -190,8 +190,8 @@ func runDoBuilds(cmd *cobra.Command, args []string) {
 	}
 }
 
-// zipDirectory archives the contents of a directory into a tar.gz file
-func zipDirectory(sourceDir, tarGzPath string) error {
+// createTarGz archives the contents of a directory into a tar.gz file
+func createTarGz(sourceDir, tarGzPath string) error {
 	// Create the tar.gz file
 	tarGzFile, err := os.Create(tarGzPath)
 	if err != nil {

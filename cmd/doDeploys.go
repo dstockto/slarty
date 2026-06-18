@@ -125,7 +125,7 @@ func runDoDeploys(cmd *cobra.Command, args []string) {
 		}
 
 		// Extract the artifact to the deploy location
-		err = unzipFile(tempFilePath, deployPath)
+		err = extractTarGz(tempFilePath, deployPath)
 		if err != nil {
 			os.Remove(tempFilePath)
 			log.Fatalf("Failed to extract artifact: %v", err)
@@ -138,8 +138,8 @@ func runDoDeploys(cmd *cobra.Command, args []string) {
 	}
 }
 
-// unzipFile extracts the contents of a tar.gz file to a destination directory
-func unzipFile(tarGzPath, destDir string) error {
+// extractTarGz extracts the contents of a tar.gz file to a destination directory
+func extractTarGz(tarGzPath, destDir string) error {
 	// Open the tar.gz file
 	file, err := os.Open(tarGzPath)
 	if err != nil {

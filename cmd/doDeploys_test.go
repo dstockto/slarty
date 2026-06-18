@@ -43,9 +43,9 @@ func TestDoDeploysCommandFlags(t *testing.T) {
 	}
 }
 
-func TestUnzipFile(t *testing.T) {
+func TestExtractTarGz(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "slarty-unzip-test")
+	tempDir, err := os.MkdirTemp("", "slarty-targz-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -89,9 +89,9 @@ func TestUnzipFile(t *testing.T) {
 
 	// Create a tar.gz file
 	tarGzPath := filepath.Join(tempDir, "test.tar.gz")
-	err = zipDirectory(sourceDir, tarGzPath)
+	err = createTarGz(sourceDir, tarGzPath)
 	if err != nil {
-		t.Fatalf("zipDirectory failed: %v", err)
+		t.Fatalf("createTarGz failed: %v", err)
 	}
 
 	// Extract the tar.gz file
@@ -101,9 +101,9 @@ func TestUnzipFile(t *testing.T) {
 		t.Fatalf("Failed to create extract directory: %v", err)
 	}
 
-	err = unzipFile(tarGzPath, extractDir)
+	err = extractTarGz(tarGzPath, extractDir)
 	if err != nil {
-		t.Fatalf("unzipFile failed: %v", err)
+		t.Fatalf("extractTarGz failed: %v", err)
 	}
 
 	// Verify the extracted files
@@ -134,7 +134,7 @@ func TestUnzipFile(t *testing.T) {
 	}
 }
 
-func TestUnzipFileRejectsPathTraversal(t *testing.T) {
+func TestExtractTarGzRejectsPathTraversal(t *testing.T) {
 	// A malicious archive whose entry name escapes the destination directory
 	// (Zip Slip) must be rejected rather than written outside destDir.
 	tempDir, err := os.MkdirTemp("", "slarty-zipslip-test")
@@ -174,9 +174,9 @@ func TestUnzipFileRejectsPathTraversal(t *testing.T) {
 		t.Fatalf("Failed to create dest directory: %v", err)
 	}
 
-	err = unzipFile(tarGzPath, destDir)
+	err = extractTarGz(tarGzPath, destDir)
 	if err == nil {
-		t.Fatal("expected unzipFile to reject path-traversal entry, got nil error")
+		t.Fatal("expected extractTarGz to reject path-traversal entry, got nil error")
 	}
 	if !strings.Contains(err.Error(), "illegal path in archive") {
 		t.Errorf("expected illegal-path error, got: %v", err)
@@ -191,9 +191,9 @@ func TestUnzipFileRejectsPathTraversal(t *testing.T) {
 
 func TestExtractFile(t *testing.T) {
 	// This is a more focused test of the extractFile function
-	// Since extractFile is not exported, we test it indirectly through unzipFile
-	// The TestUnzipFile test above already covers this functionality
-	t.Skip("extractFile is tested indirectly through unzipFile")
+	// Since extractFile is not exported, we test it indirectly through extractTarGz
+	// The TestExtractTarGz test above already covers this functionality
+	t.Skip("extractFile is tested indirectly through extractTarGz")
 }
 
 func TestRunDoDeploys(t *testing.T) {
@@ -291,11 +291,11 @@ func TestRunDoDeploys(t *testing.T) {
 	artifact1Path := filepath.Join(repoDir, artifact1Name)
 	artifact2Path := filepath.Join(repoDir, artifact2Name)
 
-	err = zipDirectory(sourceDir1, artifact1Path)
+	err = createTarGz(sourceDir1, artifact1Path)
 	if err != nil {
 		t.Fatalf("Failed to create artifact1: %v", err)
 	}
-	err = zipDirectory(sourceDir2, artifact2Path)
+	err = createTarGz(sourceDir2, artifact2Path)
 	if err != nil {
 		t.Fatalf("Failed to create artifact2: %v", err)
 	}

@@ -46,9 +46,9 @@ func TestDoBuildsCommandFlags(t *testing.T) {
 	}
 }
 
-func TestZipDirectory(t *testing.T) {
+func TestCreateTarGz(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "slarty-zip-test")
+	tempDir, err := os.MkdirTemp("", "slarty-targz-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -92,9 +92,9 @@ func TestZipDirectory(t *testing.T) {
 
 	// Create a tar.gz file
 	tarGzPath := filepath.Join(tempDir, "test.tar.gz")
-	err = zipDirectory(sourceDir, tarGzPath)
+	err = createTarGz(sourceDir, tarGzPath)
 	if err != nil {
-		t.Fatalf("zipDirectory failed: %v", err)
+		t.Fatalf("createTarGz failed: %v", err)
 	}
 
 	// Verify the tar.gz file was created
@@ -109,8 +109,8 @@ func TestZipDirectory(t *testing.T) {
 		t.Fatalf("Failed to create extract directory: %v", err)
 	}
 
-	// Use the unzipFile function from doDeploys.go to extract the tar.gz file
-	err = unzipFile(tarGzPath, extractDir)
+	// Use the extractTarGz function from doDeploys.go to extract the tar.gz file
+	err = extractTarGz(tarGzPath, extractDir)
 	if err != nil {
 		t.Fatalf("Failed to extract tar.gz file: %v", err)
 	}
