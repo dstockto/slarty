@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"io"
 	"os"
 	"os/exec"
@@ -129,6 +131,61 @@ func TestUnzipFile(t *testing.T) {
 	}
 	if string(content) != "subfile content" {
 		t.Fatalf("Extracted subfile has wrong content: expected 'subfile content', got '%s'", string(content))
+	}
+}
+
+func TestUnzipFileRejectsPathTraversal(t *testing.T) {
+	// A malicious archive whose entry name escapes the destination directory
+	// (Zip Slip) must be rejected rather than written outside destDir.
+	tempDir, err := os.MkdirTemp("", "slarty-zipslip-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Build a tar.gz with a single entry named "../escaped.txt".
+	tarGzPath := filepath.Join(tempDir, "evil.tar.gz")
+	f, err := os.Create(tarGzPath)
+	if err != nil {
+		t.Fatalf("Failed to create tar.gz: %v", err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+	payload := []byte("pwned")
+	hdr := &tar.Header{
+		Name:     "../escaped.txt",
+		Mode:     0644,
+		Size:     int64(len(payload)),
+		Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("Failed to write tar header: %v", err)
+	}
+	if _, err := tw.Write(payload); err != nil {
+		t.Fatalf("Failed to write tar payload: %v", err)
+	}
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	// Extract into a nested directory so an unguarded "../" would land in tempDir.
+	destDir := filepath.Join(tempDir, "dest")
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		t.Fatalf("Failed to create dest directory: %v", err)
+	}
+
+	err = unzipFile(tarGzPath, destDir)
+	if err == nil {
+		t.Fatal("expected unzipFile to reject path-traversal entry, got nil error")
+	}
+	if !strings.Contains(err.Error(), "illegal path in archive") {
+		t.Errorf("expected illegal-path error, got: %v", err)
+	}
+
+	// The escaped file must not exist outside the destination directory.
+	escaped := filepath.Join(tempDir, "escaped.txt")
+	if _, statErr := os.Stat(escaped); !os.IsNotExist(statErr) {
+		t.Errorf("path traversal succeeded: file written outside destination at %s", escaped)
 	}
 }
 
