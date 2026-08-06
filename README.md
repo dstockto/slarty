@@ -2,6 +2,8 @@
 
 Slarty is an artifact manager to help simplify build and deploy processes dealing with "artifacts" and "assets". The original implementation "Slarty" was written in PHP. This version in Go allows a single executable with no external dependencies to provide the same functionality. Of course, you'll need git installed, and you'll need whatever is required to build your applications available on the build server, and git installed on the server on which you're using deploying your artifacts.
 
+See [CHANGELOG.md](CHANGELOG.md) for notable changes, including behavior changes worth reviewing before upgrading.
+
 ## What is an Artifact?
 
 An artifact is the result of a code change - meaning it could be a compiled executable, a tar.gz file containing transpiled javascript or even just the contents of a project directory if that's what is needed to allow the application to run on a server. In short, an artifact ultimate ends of being a tar.gz file containing code or binaries or a combination of those which can be used whenever we'd otherwise need to build an application.
