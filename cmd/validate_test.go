@@ -244,3 +244,82 @@ func TestValidateConfigS3MissingOptions(t *testing.T) {
 		t.Errorf("Expected errors about region and bucket-name, got:\n%s", output)
 	}
 }
+
+func TestDeployLocationEscapesRoot(t *testing.T) {
+	tests := []struct {
+		location string
+		expected bool
+	}{
+		{"public/app", false},
+		{"deploy", false},
+		{".", false},
+		// Interior ".." that still lands inside the root is fine.
+		{"public/../app", false},
+		{"..", true},
+		{"../sibling", true},
+		{"public/../../sibling", true},
+		{"../../etc", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.location, func(t *testing.T) {
+			got := deployLocationEscapesRoot(tc.location)
+			if got != tc.expected {
+				t.Errorf("deployLocationEscapesRoot(%q) = %v, want %v", tc.location, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestValidateConfigFlagsEscapingDeployLocation(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "src"), 0755); err != nil {
+		t.Fatalf("Failed to create source directory: %v", err)
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": {
+			"adapter": "Local",
+			"options": { "root": "` + tempDir + `/repo" }
+		},
+		"artifacts": [
+			{
+				"name": "escapes",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "build",
+				"deploy_location": "../outside",
+				"artifact_prefix": "escapes"
+			}
+		],
+		"assets": [
+			{ "name": "asset1", "filename": "a.tar.gz", "deploy_location": "../elsewhere" }
+		]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	config, err := slarty.ReadArtifactsJson(configPath)
+	if err != nil {
+		t.Fatalf("Failed to read config: %v", err)
+	}
+
+	var buf bytes.Buffer
+	errCount, _ := validateConfig(&buf, config)
+	output := buf.String()
+
+	if errCount < 2 {
+		t.Errorf("Expected an error for the artifact and the asset, got %d. Output:\n%s", errCount, output)
+	}
+	if !strings.Contains(output, "escapes") || !strings.Contains(output, "asset1") {
+		t.Errorf("Expected both entries to be named in the output:\n%s", output)
+	}
+	if strings.Count(output, "resolves outside the project root") != 2 {
+		t.Errorf("Expected two out-of-root errors, got:\n%s", output)
+	}
+}

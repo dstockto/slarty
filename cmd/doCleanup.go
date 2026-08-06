@@ -31,62 +31,112 @@ import (
 	"strings"
 )
 
-var exclude string
+var (
+	exclude       string
+	artifactsOnly bool
+	assetsOnly    bool
+)
 
 // doCleanupCmd represents the doCleanup command
 var doCleanupCmd = &cobra.Command{
 	Use:   "do-cleanup",
-	Short: "Clear deployment directories for assets",
-	Long: `The do-cleanup command is used to clear the deployment directories for your assets.
-The command reads the configuration for any defined assets you've defined, and will delete
-the contents of the deploy_location directories as defined in artifacts.json.
-You can pass in the --filter command to limit the assets to only those that match the pattern provided.
-You can use the --exclude flag to remove assets that match the provided pattern from consideration.
-If neither --filter, nor --exclude is provided, the command will run against all defined assets.`,
+	Short: "Clear deployment directories for artifacts and assets",
+	Long: `The do-cleanup command is used to clear the deployment directories for your
+artifacts and assets. The command reads the configuration in artifacts.json and deletes
+the contents of the deploy_location directories defined in both the artifacts and the
+assets sections. This is the counterpart to do-deploys, which extracts over whatever is
+already present and never removes stale files left by an earlier deployment.
+By default both sections are cleaned. Pass --artifacts-only or --assets-only to restrict
+the command to a single section; the two flags are mutually exclusive.
+You can pass in the --filter flag to limit cleanup to only the entries whose name matches.
+You can use the --exclude flag to remove entries that match the provided name from
+consideration. Names are matched against both sections, so an artifact and an asset that
+share a name are both selected.
+If neither --filter, nor --exclude is provided, the command will run against every entry
+in the sections being cleaned. A deploy_location shared by more than one entry is cleaned
+only once.`,
 	Run: runDoCleanup,
 }
 
-// filterAssetsByNameWithExclusion filters assets by name based on the provided filter and exclude patterns
-func filterAssetsByNameWithExclusion(assets []slarty.Asset, filter []string, exclude []string) []slarty.Asset {
-	// If no filter and no exclude, return all assets
-	if len(filter) == 0 && len(exclude) == 0 {
-		return assets
-	}
+// cleanupKind identifies which section of artifacts.json a cleanup target came
+// from. It is a named type so the two sections cannot be confused with an
+// arbitrary string literal.
+type cleanupKind string
 
-	var selected []slarty.Asset
-	for _, asset := range assets {
-		name := strings.ToLower(asset.Name)
+const (
+	kindArtifact cleanupKind = "artifact"
+	kindAsset    cleanupKind = "asset"
+)
 
-		// Check if the asset should be excluded
-		excluded := false
-		for _, e := range exclude {
-			if name == strings.TrimSpace(strings.ToLower(e)) {
-				excluded = true
-				break
-			}
-		}
+// cleanupTarget is a single deploy directory selected for cleaning, tagged with
+// the config section and entry name it came from so output can identify it.
+type cleanupTarget struct {
+	Name     string
+	Kind     cleanupKind
+	Location string
+}
 
-		// Skip this asset if it's excluded
-		if excluded {
-			continue
-		}
+// nameSelected reports whether an entry name survives the filter and exclude
+// lists. Exclusion wins over inclusion, and an empty filter list matches
+// everything that was not excluded.
+func nameSelected(name string, filter []string, exclude []string) bool {
+	lowered := strings.ToLower(name)
 
-		// If there's no filter, include all non-excluded assets
-		if len(filter) == 0 {
-			selected = append(selected, asset)
-			continue
-		}
-
-		// Check if the asset matches the filter
-		for _, f := range filter {
-			if name == strings.TrimSpace(strings.ToLower(f)) {
-				selected = append(selected, asset)
-				break
-			}
+	for _, e := range exclude {
+		if lowered == strings.TrimSpace(strings.ToLower(e)) {
+			return false
 		}
 	}
 
-	return selected
+	if len(filter) == 0 {
+		return true
+	}
+
+	for _, f := range filter {
+		if lowered == strings.TrimSpace(strings.ToLower(f)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// collectCleanupTargets gathers the deploy locations to clean from the requested
+// config sections, preserving config order with artifacts ahead of assets.
+func collectCleanupTargets(
+	config *slarty.ArtifactsConfig,
+	filter []string,
+	exclude []string,
+	includeArtifacts bool,
+	includeAssets bool,
+) []cleanupTarget {
+	var targets []cleanupTarget
+
+	if includeArtifacts {
+		for _, artifact := range config.Artifacts {
+			if nameSelected(artifact.Name, filter, exclude) {
+				targets = append(targets, cleanupTarget{
+					Name:     artifact.Name,
+					Kind:     kindArtifact,
+					Location: artifact.DeployLocation,
+				})
+			}
+		}
+	}
+
+	if includeAssets {
+		for _, asset := range config.Assets {
+			if nameSelected(asset.Name, filter, exclude) {
+				targets = append(targets, cleanupTarget{
+					Name:     asset.Name,
+					Kind:     kindAsset,
+					Location: asset.DeployLocation,
+				})
+			}
+		}
+	}
+
+	return targets
 }
 
 func runDoCleanup(cmd *cobra.Command, args []string) {
@@ -108,45 +158,47 @@ func runDoCleanup(cmd *cobra.Command, args []string) {
 		excludes = strings.Split(exclude, ",")
 	}
 
-	// Get the assets based on the filter and exclude
-	assets := filterAssetsByNameWithExclusion(artifactConfig.Assets, filters, excludes)
+	// Decide which config sections to clean. With neither flag set, both are
+	// cleaned; the flags are marked mutually exclusive so at most one is true.
+	includeArtifacts := !assetsOnly
+	includeAssets := !artifactsOnly
 
-	if len(assets) == 0 {
-		fmt.Println("No assets found")
+	// Get the targets based on the section flags, filter and exclude
+	targets := collectCleanupTargets(artifactConfig, filters, excludes, includeArtifacts, includeAssets)
+
+	if len(targets) == 0 {
+		fmt.Println("No artifacts or assets found")
 		return
 	}
 
-	// Clean up each asset's deploy location
-	for _, asset := range assets {
-		fmt.Printf("Cleaning up deploy location for %s: %s\n", asset.Name, asset.DeployLocation)
+	rootAbs, err := resolvePath(artifactConfig.RootDirectory)
+	if err != nil {
+		log.Fatalf("Failed to resolve root directory: %v", err)
+	}
+
+	// Several entries may share a deploy_location. Track the paths already
+	// cleaned so the directory is emptied once rather than once per entry.
+	cleaned := make(map[string]string)
+
+	// Clean up each target's deploy location
+	for _, target := range targets {
+		fmt.Printf("Cleaning up deploy location for %s %s: %s\n", target.Kind, target.Name, target.Location)
 
 		// Get the full path to the deploy location
-		deployPath := filepath.Join(artifactConfig.RootDirectory, asset.DeployLocation)
+		deployPath := filepath.Join(artifactConfig.RootDirectory, target.Location)
 
-		// Guard against cleaning the project root itself. An empty or "."
-		// deploy_location causes filepath.Join to collapse to RootDirectory,
-		// which would otherwise wipe the entire project. Refuse to clean when
-		// the resolved deploy path is the project root or an ancestor of it.
-		deployAbs, err := filepath.Abs(deployPath)
+		deployAbs, err := resolvePath(deployPath)
 		if err != nil {
 			log.Fatalf("Failed to resolve deploy directory: %v", err)
 		}
-		deployAbs = filepath.Clean(deployAbs)
 
-		rootAbs, err := filepath.Abs(artifactConfig.RootDirectory)
-		if err != nil {
-			log.Fatalf("Failed to resolve root directory: %v", err)
-		}
-		rootAbs = filepath.Clean(rootAbs)
-
-		if deployAbs == rootAbs {
-			fmt.Printf(" - Refusing to clean %s: resolves to or contains the project root\n", deployPath)
+		if violation := deployPathViolation(deployAbs, rootAbs); violation != "" {
+			fmt.Printf(" - Refusing to clean %s: %s\n", deployPath, violation)
 			continue
 		}
-		if rel, relErr := filepath.Rel(deployAbs, rootAbs); relErr == nil &&
-			rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
-			// rootAbs is inside deployAbs, so deployPath is an ancestor of the root.
-			fmt.Printf(" - Refusing to clean %s: resolves to or contains the project root\n", deployPath)
+
+		if owner, done := cleaned[deployAbs]; done {
+			fmt.Printf(" - Already cleaned by %s\n", owner)
 			continue
 		}
 
@@ -164,8 +216,81 @@ func runDoCleanup(cmd *cobra.Command, args []string) {
 		if err != nil {
 			log.Fatalf("Failed to clean up deploy directory: %v", err)
 		}
+		cleaned[deployAbs] = fmt.Sprintf("%s %s", target.Kind, target.Name)
 		fmt.Printf(" - Successfully cleaned up %s\n", deployPath)
 	}
+}
+
+// resolvePath returns path as an absolute, symlink-free location.
+//
+// filepath.Abs and filepath.Clean are both purely lexical, so on their own they
+// let a deploy_location that is (or traverses) a symlink pointing at the project
+// root slip past the containment check below, after which removeContents would
+// delete through the link. Symlinks are resolved on the deepest ancestor that
+// exists and the missing tail is appended back, so a deploy location that has
+// not been created yet still compares correctly against a root that itself
+// lives behind a symlink — /var on macOS being the common case.
+func resolvePath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+
+	remainder := ""
+	current := abs
+	for {
+		resolved, evalErr := filepath.EvalSymlinks(current)
+		if evalErr == nil {
+			return filepath.Join(resolved, remainder), nil
+		}
+		if !os.IsNotExist(evalErr) {
+			return "", evalErr
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			// Walked to the filesystem root without finding anything that
+			// exists; nothing can be resolved, so use the lexical form.
+			return abs, nil
+		}
+		remainder = filepath.Join(filepath.Base(current), remainder)
+		current = parent
+	}
+}
+
+// deployPathViolation reports why deployAbs must not be cleaned, or "" when it
+// is safe to clean.
+//
+// Cleaning is confined to directories strictly inside the project root.
+// deploy_location is documented as relative to root_directory, and
+// filepath.Join already collapses an absolute deploy_location back under the
+// root, so a path that escapes the root cannot be a deliberate deployment
+// target — it is a configuration mistake, and this command deletes files.
+// That rules out three cases: the root itself (an empty or "." deploy_location
+// collapses to it), any ancestor of the root, and any sibling reached with
+// "..". Both arguments must already be absolute, cleaned, and symlink-resolved.
+func deployPathViolation(deployAbs, rootAbs string) string {
+	if deployAbs == rootAbs {
+		return "resolves to the project root"
+	}
+
+	rel, err := filepath.Rel(rootAbs, deployAbs)
+	if err != nil {
+		return "cannot be resolved relative to the project root"
+	}
+
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		// Separate an ancestor of the root from an unrelated directory, since
+		// the two mistakes have different causes and different fixes.
+		if inner, innerErr := filepath.Rel(deployAbs, rootAbs); innerErr == nil &&
+			inner != ".." && !strings.HasPrefix(inner, ".."+string(filepath.Separator)) && !filepath.IsAbs(inner) {
+			return "contains the project root"
+		}
+		return "resolves outside the project root"
+	}
+
+	return ""
 }
 
 // removeContents removes all files and directories within the specified directory
@@ -195,6 +320,9 @@ func init() {
 	rootCmd.AddCommand(doCleanupCmd)
 
 	// Define flags specific to this command
-	doCleanupCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"asset1,asset2\"")
-	doCleanupCmd.Flags().StringVarP(&exclude, "exclude", "e", "", "-e \"asset3,asset4\"")
+	doCleanupCmd.Flags().StringVarP(&filter, "filter", "f", "", "-f \"artifact1,asset2\"")
+	doCleanupCmd.Flags().StringVarP(&exclude, "exclude", "e", "", "-e \"artifact3,asset4\"")
+	doCleanupCmd.Flags().BoolVar(&artifactsOnly, "artifacts-only", false, "Only clean deploy locations from the artifacts section")
+	doCleanupCmd.Flags().BoolVar(&assetsOnly, "assets-only", false, "Only clean deploy locations from the assets section")
+	doCleanupCmd.MarkFlagsMutuallyExclusive("artifacts-only", "assets-only")
 }
