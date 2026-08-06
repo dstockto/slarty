@@ -109,7 +109,7 @@ An example:
 
 ## Configuration - "assets" section
 
-The assets section is an array of objects. Each object defines the information needed to retrieve an asset from the artifact repository as well as where it should be extracted to. At this time, the assets section only is used for the `deploy-assets` command. No other command uses or is aware of this section.
+The assets section is an array of objects. Each object defines the information needed to retrieve an asset from the artifact repository as well as where it should be extracted to. The assets section is used by the `deploy-assets` command, and by `do-cleanup` when clearing asset deploy locations. No other command uses or is aware of this section.
 
 An example:
 
@@ -131,6 +131,14 @@ An example:
 
 Slarty provides a number of commands. All are executed with slarty or /path/to/slarty.
 
+### Global options
+
+These are available to every command:
+
+* **`[-a|--artifacts]`** - path to your `artifacts.json`. Defaults to `./artifacts.json`. This is the flag you want for pointing Slarty at a configuration file.
+* **`[-l|--local]`** - treat the repository adapter as `local` regardless of what `artifacts.json` says. See [Local Mode](#local-mode).
+* **`--config`** - path to Slarty's own settings file, which defaults to `$HOME/.slarty.yaml`. This is **not** your `artifacts.json`, and it has no `-c` shorthand.
+
 ### slarty hash <root\> <directories...\>
 
 The hash command does not require artifacts config. The root value is where to start calculating the hash from and the directories are space separated relative paths to use when calculating the hash. The order of the provided directories will not affect the hash result.
@@ -145,7 +153,7 @@ If the directories do not exist or are empty, you'll see an error. Please note: 
 
 ### slarty artifact-names
 
-The `artifact-names` command can accept [-c|--config] and [-f|--filter] options. Both are optional. If no configuration file is specified, it will default to ./artifacts.json. The filter option is used to provide a list of applications for which to provide artifact names. The result of this command is a table of applications paired with the artifact name for the current state of the repo:
+The `artifact-names` command can accept [-a|--artifacts] and [-f|--filter] options. Both are optional. If no configuration file is specified, it will default to ./artifacts.json. The filter option is used to provide a list of applications for which to provide artifact names. The result of this command is a table of applications paired with the artifact name for the current state of the repo:
 
 ```
 ➜  Slarty git:(master) ✗ slarty artifact-names
@@ -162,7 +170,7 @@ The `artifact-names` command can accept [-c|--config] and [-f|--filter] options.
 
 ### slarty hash-application
 
-Similarly to artifact-names, hash-application takes the same [-c|--config] and [-f|--filter] options. Instead of an artifact name, it provides the hashes alone.
+Similarly to artifact-names, hash-application takes the same [-a|--artifacts] and [-f|--filter] options. Instead of an artifact name, it provides the hashes alone.
 
 ```
 ➜  Slarty git:(master) ✗ slarty hash-application
@@ -178,7 +186,7 @@ Similarly to artifact-names, hash-application takes the same [-c|--config] and [
 
 ### slarty should-build
 
-The `should-build` command accepts the same options as most of the Slarty commands - [-c|--config] and [-f|--filter]. The purpose of this command is to determine if the artifact archive exists in the repository. If it does exist then a build is not needed. If it does not, then a build would be needed. This command does that determination but without actually doing the builds.
+The `should-build` command accepts the same options as most of the Slarty commands - [-a|--artifacts] and [-f|--filter]. The purpose of this command is to determine if the artifact archive exists in the repository. If it does exist then a build is not needed. If it does not, then a build would be needed. This command does that determination but without actually doing the builds.
 
 ```
 ➜  Slarty git:(master) ✗ slarty should-build
@@ -196,7 +204,7 @@ In the example above, the artifacts for the `Models` and `AMess` applications al
 
 ### slarty do-builds
 
-The `do-builds` command, like most above also accepts the `[-c|--config]` and `[-f|--filter]`. It also accepts a `--force` option. Running `do-builds` will determine the name of the artifact that should result from a build. If it exists in the repo, then it will not be executed. If it does not exist, then the `command` part of the artifacts configuration will be executed. Once the build succeeds, the archive will be created as a tar.gz of the `output_directory`, named like what you'd see in the `artifact-names` command. It then stores that archive in the repository.
+The `do-builds` command, like most above also accepts the `[-a|--artifacts]` and `[-f|--filter]`. It also accepts a `--force` option. Running `do-builds` will determine the name of the artifact that should result from a build. If it exists in the repo, then it will not be executed. If it does not exist, then the `command` part of the artifacts configuration will be executed. Once the build succeeds, the archive will be created as a tar.gz of the `output_directory`, named like what you'd see in the `artifact-names` command. It then stores that archive in the repository.
 
 If you provide the `--force` option, then it will not check if the archive exists in the repository. It will build and store the result in the repository which means if it did exist, it will be overwritten. If the build process changed but the code did not, this would be a good way to ensure that the proper artifact archive is what is stored in the repo.
 
@@ -229,7 +237,7 @@ If the `--force` option were provided in the example above, then all four builds
 
 ### slarty do-deploys
 
-Like most of the commands above, the `do-deploys` command accepts the `[-c|--config]` and `[-f|--fiter]` options. The purpose of the `do-deploys` command is to identify the archives that match the current repository's code state, download those from the repository, and extract them into the `deploy_location` directory. If the archive cannot be found in the repository then it will be treated as a fatal error. This is to keep the steps of building and deploying strictly separated. Ideally, building happens on a Continuous Integration (CI) server while deployment would happen on the web or application server.
+Like most of the commands above, the `do-deploys` command accepts the `[-a|--artifacts]` and `[-f|--filter]` options. The purpose of the `do-deploys` command is to identify the archives that match the current repository's code state, download those from the repository, and extract them into the `deploy_location` directory. If the archive cannot be found in the repository then it will be treated as a fatal error. This is to keep the steps of building and deploying strictly separated. Ideally, building happens on a Continuous Integration (CI) server while deployment would happen on the web or application server.
 
 ```
 Found artifact slarty-source-15ab98133cfacf640b76d7fdf7890211110e5041.tar.gz for source
@@ -250,11 +258,11 @@ Found artifact slarty-mess-f2788bbe13c3240951a10d97593467a68502e2f7.tar.gz for A
  - Deleted (tar.gz) artifact
 ```
 
-The `do-deploy` process will create the directory structure specified in the `deploy_location` value. However, if that structure exists and contains files, it will not be cleared. That is a separate responsibility that should be taken care of elsewhere. The idea is that if an application needs to deploy several artifacts to the same place, it can do so. The extraction command will overwrite any existing files that are in place when the deploy occurs. It will not remove any files that were already in place, so if a file existed in one deployment archive and then does not exist in the next, it would still exist in the deployment output directory.
+The `do-deploy` process will create the directory structure specified in the `deploy_location` value. However, if that structure exists and contains files, it will not be cleared. That is a separate responsibility, handled by the [`do-cleanup`](#slarty-do-cleanup) command. The idea is that if an application needs to deploy several artifacts to the same place, it can do so. The extraction command will overwrite any existing files that are in place when the deploy occurs. It will not remove any files that were already in place, so if a file existed in one deployment archive and then does not exist in the next, it would still exist in the deployment output directory. Run `slarty do-cleanup` before `slarty do-deploys` if you need each deployment to start from an empty directory.
 
 ### slarty deploy-assets
 
-The `deploy-assets` command accepts the `--filter` and `--config` options. They work the same as the other commands, except filter works on the name value in the config.
+The `deploy-assets` command accepts the `[-a|--artifacts]` and `[-f|--filter]` options. They work the same as the other commands, except filter works on the name value in the config.
 
 If you run `slarty deploy-assets` and Slarty is unable to find one of the referenced files in the artifact repository, the command will fail and tell you the asset that is missing. At this time, it does not "pre-check" for existence. It will work through the assets in order and it will fail on the first one that is missing. If it fails the return code of slarty will be non-zero.
 
@@ -262,7 +270,19 @@ The `deploy-assets` command will create the output directory path if it does not
 
 ### slarty do-cleanup
 
-The `do-cleanup` command is used to clear the deployment directories for your assets. The command accepts the `--config`, `--filter` and `--exclude` flags. The `--config` is to provide the path to the artifacts.json file. The command reads the configuration for any defined assets you've defined, and will delete the contents of the `deploy_location` directories as defined in `artifacts.json`. You can pass in the `--filter` command to limit the assets to only those that match the name provided. You can use the `--exclude` flag to remove assets that match the provided name from consideration. If neither `--filter`, nor `--exclude` is provided, the command will run against all defined assets. 
+The `do-cleanup` command is used to clear the deployment directories for your artifacts and assets. It is the counterpart to `do-deploys`, which extracts over whatever is already present and never removes files left behind by an earlier deployment.
+
+The command accepts the `[-a|--artifacts]`, `[-f|--filter]` and `[-e|--exclude]` options, along with the `--artifacts-only` and `--assets-only` flags. The command reads the configuration and deletes the contents of the `deploy_location` directories defined in **both** the `artifacts` and the `assets` sections.
+
+Use `--artifacts-only` or `--assets-only` to restrict cleanup to a single section. The two flags are mutually exclusive, and passing both is an error. If neither is given, both sections are cleaned.
+
+You can pass in the `--filter` flag to limit cleanup to only the entries whose name matches. You can use the `--exclude` flag to remove entries that match the provided name from consideration. Names are matched against both sections, so an artifact and an asset that share a name are both selected. If neither `--filter`, nor `--exclude` is provided, the command will run against every entry in the sections being cleaned.
+
+A `deploy_location` shared by more than one entry is cleaned only once, so artifacts that deploy into the same directory do not wipe each other. The contents of each directory are removed, but the directory itself is left in place.
+
+As a safety measure, `do-cleanup` refuses to clean a `deploy_location` that resolves to the project root or to a directory containing it — which is what an empty or `"."` `deploy_location` would otherwise do. Such entries are reported and skipped. Use `slarty validate` to catch these in advance.
+
+> **Note:** in the original PHP implementation, `do-cleanup` cleaned only the `artifacts` section. Versions of this Go port before the fix for issue #39 cleaned only the `assets` section, which meant stale files in artifact deploy locations were never removed. It now cleans both.
 
 ## Security considerations
 

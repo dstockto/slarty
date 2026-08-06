@@ -44,56 +44,152 @@ func TestDoCleanupCommandFlags(t *testing.T) {
 	if flags.Lookup("exclude") == nil {
 		t.Error("do-cleanup command should have 'exclude' flag")
 	}
+
+	// Check section-restriction flags
+	if flags.Lookup("artifacts-only") == nil {
+		t.Error("do-cleanup command should have 'artifacts-only' flag")
+	}
+	if flags.Lookup("assets-only") == nil {
+		t.Error("do-cleanup command should have 'assets-only' flag")
+	}
 }
 
-func TestFilterAssetsByNameWithExclusion(t *testing.T) {
-	// Create test assets
-	assets := []slarty.Asset{
-		{Name: "asset1", Filename: "file1.tar.gz", DeployLocation: "deploy/asset1"},
-		{Name: "asset2", Filename: "file2.tar.gz", DeployLocation: "deploy/asset2"},
-		{Name: "asset3", Filename: "file3.tar.gz", DeployLocation: "deploy/asset3"},
+func TestNameSelected(t *testing.T) {
+	tests := []struct {
+		name     string
+		entry    string
+		filter   []string
+		exclude  []string
+		expected bool
+	}{
+		{"no filter no exclude selects", "asset1", nil, nil, true},
+		{"matching filter selects", "asset1", []string{"asset1", "asset2"}, nil, true},
+		{"non-matching filter rejects", "asset3", []string{"asset1", "asset2"}, nil, false},
+		{"exclude rejects", "asset3", nil, []string{"asset3"}, false},
+		{"exclude beats filter", "asset3", []string{"asset3"}, []string{"asset3"}, false},
+		{"filter is case insensitive", "asset1", []string{"ASSET1"}, nil, true},
+		{"exclude is case insensitive", "asset1", nil, []string{"ASSET1"}, false},
+		{"filter tolerates surrounding space", "asset1", []string{" asset1 "}, nil, true},
+		{"exclude tolerates surrounding space", "asset1", nil, []string{" asset1 "}, false},
 	}
 
-	// Test with no filter and no exclude
-	filtered := filterAssetsByNameWithExclusion(assets, nil, nil)
-	if len(filtered) != 3 {
-		t.Errorf("Expected 3 assets with no filter and no exclude, got %d", len(filtered))
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nameSelected(tc.entry, tc.filter, tc.exclude)
+			if got != tc.expected {
+				t.Errorf("nameSelected(%q, %v, %v) = %v, want %v", tc.entry, tc.filter, tc.exclude, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestCollectCleanupTargets(t *testing.T) {
+	config := &slarty.ArtifactsConfig{
+		Artifacts: []slarty.ArtifactConfig{
+			{Name: "app1", DeployLocation: "public/app1"},
+			{Name: "app2", DeployLocation: "public/app2"},
+		},
+		Assets: []slarty.Asset{
+			{Name: "asset1", Filename: "file1.tar.gz", DeployLocation: "deploy/asset1"},
+			// Shares a name with an artifact, so a filter naming it selects both.
+			{Name: "app1", Filename: "file2.tar.gz", DeployLocation: "deploy/app1"},
+		},
 	}
 
-	// Test with filter only
-	filtered = filterAssetsByNameWithExclusion(assets, []string{"asset1", "asset2"}, nil)
-	if len(filtered) != 2 {
-		t.Errorf("Expected 2 assets with filter, got %d", len(filtered))
-	}
-	if filtered[0].Name != "asset1" || filtered[1].Name != "asset2" {
-		t.Errorf("Expected filtered assets to be asset1 and asset2, got %s and %s", filtered[0].Name, filtered[1].Name)
+	t.Run("BothSections", func(t *testing.T) {
+		targets := collectCleanupTargets(config, nil, nil, true, true)
+		if len(targets) != 4 {
+			t.Fatalf("Expected 4 targets, got %d", len(targets))
+		}
+		// Artifacts come first, in config order, then assets.
+		expected := []cleanupTarget{
+			{Name: "app1", Kind: "artifact", Location: "public/app1"},
+			{Name: "app2", Kind: "artifact", Location: "public/app2"},
+			{Name: "asset1", Kind: "asset", Location: "deploy/asset1"},
+			{Name: "app1", Kind: "asset", Location: "deploy/app1"},
+		}
+		for i, want := range expected {
+			if targets[i] != want {
+				t.Errorf("target %d = %+v, want %+v", i, targets[i], want)
+			}
+		}
+	})
+
+	t.Run("ArtifactsOnly", func(t *testing.T) {
+		targets := collectCleanupTargets(config, nil, nil, true, false)
+		if len(targets) != 2 {
+			t.Fatalf("Expected 2 targets, got %d", len(targets))
+		}
+		for _, target := range targets {
+			if target.Kind != "artifact" {
+				t.Errorf("Expected only artifacts, got %+v", target)
+			}
+		}
+	})
+
+	t.Run("AssetsOnly", func(t *testing.T) {
+		targets := collectCleanupTargets(config, nil, nil, false, true)
+		if len(targets) != 2 {
+			t.Fatalf("Expected 2 targets, got %d", len(targets))
+		}
+		for _, target := range targets {
+			if target.Kind != "asset" {
+				t.Errorf("Expected only assets, got %+v", target)
+			}
+		}
+	})
+
+	t.Run("FilterMatchesBothSections", func(t *testing.T) {
+		targets := collectCleanupTargets(config, []string{"app1"}, nil, true, true)
+		if len(targets) != 2 {
+			t.Fatalf("Expected 2 targets for a name shared across sections, got %d", len(targets))
+		}
+		if targets[0].Kind != "artifact" || targets[1].Kind != "asset" {
+			t.Errorf("Expected one artifact and one asset, got %+v", targets)
+		}
+	})
+
+	t.Run("ExcludeAppliesToBothSections", func(t *testing.T) {
+		targets := collectCleanupTargets(config, nil, []string{"app1"}, true, true)
+		if len(targets) != 2 {
+			t.Fatalf("Expected 2 targets after excluding a shared name, got %d", len(targets))
+		}
+		for _, target := range targets {
+			if target.Name == "app1" {
+				t.Errorf("Expected app1 to be excluded from both sections, got %+v", target)
+			}
+		}
+	})
+
+	t.Run("NeitherSection", func(t *testing.T) {
+		targets := collectCleanupTargets(config, nil, nil, false, false)
+		if len(targets) != 0 {
+			t.Errorf("Expected 0 targets, got %d", len(targets))
+		}
+	})
+}
+
+func TestIsProjectRootOrAncestor(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "srv", "app")
+
+	tests := []struct {
+		name      string
+		deployAbs string
+		expected  bool
+	}{
+		{"same as root", root, true},
+		{"parent of root", filepath.Join(string(filepath.Separator), "srv"), true},
+		{"child of root", filepath.Join(root, "public", "build"), false},
+		{"sibling of root", filepath.Join(string(filepath.Separator), "srv", "other"), false},
 	}
 
-	// Test with exclude only
-	filtered = filterAssetsByNameWithExclusion(assets, nil, []string{"asset3"})
-	if len(filtered) != 2 {
-		t.Errorf("Expected 2 assets with exclude, got %d", len(filtered))
-	}
-	if filtered[0].Name != "asset1" || filtered[1].Name != "asset2" {
-		t.Errorf("Expected filtered assets to be asset1 and asset2, got %s and %s", filtered[0].Name, filtered[1].Name)
-	}
-
-	// Test with both filter and exclude
-	filtered = filterAssetsByNameWithExclusion(assets, []string{"asset1", "asset3"}, []string{"asset3"})
-	if len(filtered) != 1 {
-		t.Errorf("Expected 1 asset with filter and exclude, got %d", len(filtered))
-	}
-	if filtered[0].Name != "asset1" {
-		t.Errorf("Expected filtered asset to be asset1, got %s", filtered[0].Name)
-	}
-
-	// Test with case insensitivity
-	filtered = filterAssetsByNameWithExclusion(assets, []string{"ASSET1"}, nil)
-	if len(filtered) != 1 {
-		t.Errorf("Expected 1 asset with case-insensitive filter, got %d", len(filtered))
-	}
-	if filtered[0].Name != "asset1" {
-		t.Errorf("Expected filtered asset to be asset1, got %s", filtered[0].Name)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isProjectRootOrAncestor(tc.deployAbs, root)
+			if got != tc.expected {
+				t.Errorf("isProjectRootOrAncestor(%q, %q) = %v, want %v", tc.deployAbs, root, got, tc.expected)
+			}
+		})
 	}
 }
 
@@ -241,6 +337,10 @@ func TestRunDoCleanup(t *testing.T) {
 	oldExclude := exclude
 	defer func() { exclude = oldExclude }()
 
+	// Save original section flags and restore after test
+	restoreSections := stubSectionFlags(false, false)
+	defer restoreSections()
+
 	// Test with no filter and no exclude
 	t.Run("NoFilterNoExclude", func(t *testing.T) {
 		filter = ""
@@ -272,10 +372,10 @@ func TestRunDoCleanup(t *testing.T) {
 		output := buf.String()
 
 		// Check that both assets are cleaned up
-		if !strings.Contains(output, "Cleaning up deploy location for asset1") {
+		if !strings.Contains(output, "Cleaning up deploy location for asset asset1") {
 			t.Errorf("Expected output to indicate cleanup of asset1, got: %s", output)
 		}
-		if !strings.Contains(output, "Cleaning up deploy location for asset2") {
+		if !strings.Contains(output, "Cleaning up deploy location for asset asset2") {
 			t.Errorf("Expected output to indicate cleanup of asset2, got: %s", output)
 		}
 
@@ -325,10 +425,10 @@ func TestRunDoCleanup(t *testing.T) {
 		output := buf.String()
 
 		// Check that only the filtered asset is cleaned up
-		if !strings.Contains(output, "Cleaning up deploy location for asset1") {
+		if !strings.Contains(output, "Cleaning up deploy location for asset asset1") {
 			t.Errorf("Expected output to indicate cleanup of asset1, got: %s", output)
 		}
-		if strings.Contains(output, "Cleaning up deploy location for asset2") {
+		if strings.Contains(output, "Cleaning up deploy location for asset asset2") {
 			t.Errorf("Expected output to not contain asset2, got: %s", output)
 		}
 
@@ -376,10 +476,10 @@ func TestRunDoCleanup(t *testing.T) {
 		output := buf.String()
 
 		// Check that only the non-excluded asset is cleaned up
-		if strings.Contains(output, "Cleaning up deploy location for asset1") {
+		if strings.Contains(output, "Cleaning up deploy location for asset asset1") {
 			t.Errorf("Expected output to not contain asset1, got: %s", output)
 		}
-		if !strings.Contains(output, "Cleaning up deploy location for asset2") {
+		if !strings.Contains(output, "Cleaning up deploy location for asset asset2") {
 			t.Errorf("Expected output to indicate cleanup of asset2, got: %s", output)
 		}
 
@@ -452,6 +552,9 @@ func TestRunDoCleanupRefusesProjectRoot(t *testing.T) {
 	defer func() { exclude = oldExclude }()
 	exclude = ""
 
+	restoreSections := stubSectionFlags(false, false)
+	defer restoreSections()
+
 	// Capture stdout.
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -479,5 +582,288 @@ func TestRunDoCleanupRefusesProjectRoot(t *testing.T) {
 	// Output should indicate the asset was refused/skipped.
 	if !strings.Contains(output, "Refusing to clean") {
 		t.Errorf("Expected output to indicate the asset was refused, got: %s", output)
+	}
+}
+
+// stubSectionFlags sets the section-restriction globals and returns a function
+// that restores their previous values.
+func stubSectionFlags(artifacts, assets bool) func() {
+	oldArtifactsOnly, oldAssetsOnly := artifactsOnly, assetsOnly
+	artifactsOnly, assetsOnly = artifacts, assets
+	return func() {
+		artifactsOnly, assetsOnly = oldArtifactsOnly, oldAssetsOnly
+	}
+}
+
+// captureCleanupOutput runs do-cleanup against configPath with the given flag
+// values and returns everything it wrote to stdout.
+func captureCleanupOutput(t *testing.T, configPath, filterVal, excludeVal string, artifacts, assets bool) string {
+	t.Helper()
+
+	oldArtifactsJson := artifactsJson
+	defer func() { artifactsJson = oldArtifactsJson }()
+	artifactsJson = configPath
+
+	oldFilter, oldExclude := filter, exclude
+	defer func() { filter, exclude = oldFilter, oldExclude }()
+	filter, exclude = filterVal, excludeVal
+
+	restoreSections := stubSectionFlags(artifacts, assets)
+	defer restoreSections()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	runDoCleanup(&cobra.Command{Use: "test"}, []string{})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+// writeCleanupFixture builds a project root containing an artifact deploy
+// directory and an asset deploy directory, each holding one stale file, plus an
+// artifacts.json describing both. It returns the config path and the two files.
+func writeCleanupFixture(t *testing.T) (configPath, artifactFile, assetFile string) {
+	t.Helper()
+
+	tempDir := t.TempDir()
+
+	artifactDir := filepath.Join(tempDir, "public", "app1")
+	assetDir := filepath.Join(tempDir, "deploy", "asset1")
+	for _, dir := range []string{artifactDir, assetDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("Failed to create directory %s: %v", dir, err)
+		}
+	}
+
+	artifactFile = filepath.Join(artifactDir, "stale-artifact.txt")
+	assetFile = filepath.Join(assetDir, "stale-asset.txt")
+	for _, file := range []string{artifactFile, assetFile} {
+		if err := os.WriteFile(file, []byte("stale"), 0644); err != nil {
+			t.Fatalf("Failed to create file %s: %v", file, err)
+		}
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": {
+			"adapter": "Local",
+			"options": {
+				"root": "` + tempDir + `/repo"
+			}
+		},
+		"artifacts": [
+			{
+				"name": "app1",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "public/app1",
+				"deploy_location": "public/app1",
+				"artifact_prefix": "app1"
+			}
+		],
+		"assets": [
+			{
+				"name": "asset1",
+				"filename": "file1.tar.gz",
+				"deploy_location": "deploy/asset1"
+			}
+		]
+	}`
+
+	configPath = filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	return configPath, artifactFile, assetFile
+}
+
+// TestRunDoCleanupCleansArtifacts is the regression test for issue #39: the Go
+// port cleaned only the assets section, so files left in an artifact's
+// deploy_location by a previous do-deploys survived into the next deployment.
+func TestRunDoCleanupCleansArtifacts(t *testing.T) {
+	configPath, artifactFile, assetFile := writeCleanupFixture(t)
+
+	output := captureCleanupOutput(t, configPath, "", "", false, false)
+
+	if !strings.Contains(output, "Cleaning up deploy location for artifact app1") {
+		t.Errorf("Expected output to indicate cleanup of artifact app1, got: %s", output)
+	}
+	if !strings.Contains(output, "Cleaning up deploy location for asset asset1") {
+		t.Errorf("Expected output to indicate cleanup of asset asset1, got: %s", output)
+	}
+
+	if _, err := os.Stat(artifactFile); !os.IsNotExist(err) {
+		t.Errorf("Artifact deploy file %s survived cleanup", artifactFile)
+	}
+	if _, err := os.Stat(assetFile); !os.IsNotExist(err) {
+		t.Errorf("Asset deploy file %s survived cleanup", assetFile)
+	}
+}
+
+func TestRunDoCleanupSectionFlags(t *testing.T) {
+	t.Run("ArtifactsOnly", func(t *testing.T) {
+		configPath, artifactFile, assetFile := writeCleanupFixture(t)
+
+		output := captureCleanupOutput(t, configPath, "", "", true, false)
+
+		if strings.Contains(output, "asset asset1") {
+			t.Errorf("Expected --artifacts-only to skip assets, got: %s", output)
+		}
+		if _, err := os.Stat(artifactFile); !os.IsNotExist(err) {
+			t.Errorf("Artifact deploy file %s survived --artifacts-only cleanup", artifactFile)
+		}
+		if _, err := os.Stat(assetFile); os.IsNotExist(err) {
+			t.Errorf("Asset deploy file %s was removed despite --artifacts-only", assetFile)
+		}
+	})
+
+	t.Run("AssetsOnly", func(t *testing.T) {
+		configPath, artifactFile, assetFile := writeCleanupFixture(t)
+
+		output := captureCleanupOutput(t, configPath, "", "", false, true)
+
+		if strings.Contains(output, "artifact app1") {
+			t.Errorf("Expected --assets-only to skip artifacts, got: %s", output)
+		}
+		if _, err := os.Stat(assetFile); !os.IsNotExist(err) {
+			t.Errorf("Asset deploy file %s survived --assets-only cleanup", assetFile)
+		}
+		if _, err := os.Stat(artifactFile); os.IsNotExist(err) {
+			t.Errorf("Artifact deploy file %s was removed despite --assets-only", artifactFile)
+		}
+	})
+}
+
+// TestRunDoCleanupDedupesSharedDeployLocation covers two entries pointing at the
+// same deploy_location: the directory is emptied once and the second entry
+// reports that it was already handled rather than cleaning again.
+func TestRunDoCleanupDedupesSharedDeployLocation(t *testing.T) {
+	tempDir := t.TempDir()
+
+	sharedDir := filepath.Join(tempDir, "public", "shared")
+	if err := os.MkdirAll(sharedDir, 0755); err != nil {
+		t.Fatalf("Failed to create shared directory: %v", err)
+	}
+	sharedFile := filepath.Join(sharedDir, "stale.txt")
+	if err := os.WriteFile(sharedFile, []byte("stale"), 0644); err != nil {
+		t.Fatalf("Failed to create shared file: %v", err)
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": {
+			"adapter": "Local",
+			"options": {
+				"root": "` + tempDir + `/repo"
+			}
+		},
+		"artifacts": [
+			{
+				"name": "app1",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "public/shared",
+				"deploy_location": "public/shared",
+				"artifact_prefix": "app1"
+			},
+			{
+				"name": "app2",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "public/shared",
+				"deploy_location": "public/shared",
+				"artifact_prefix": "app2"
+			}
+		]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	output := captureCleanupOutput(t, configPath, "", "", false, false)
+
+	if !strings.Contains(output, "Already cleaned by artifact app1") {
+		t.Errorf("Expected app2 to report the shared location was already cleaned, got: %s", output)
+	}
+	if strings.Count(output, "Successfully cleaned up") != 1 {
+		t.Errorf("Expected the shared deploy location to be cleaned exactly once, got: %s", output)
+	}
+	if _, err := os.Stat(sharedFile); !os.IsNotExist(err) {
+		t.Errorf("Shared deploy file %s survived cleanup", sharedFile)
+	}
+	if _, err := os.Stat(sharedDir); os.IsNotExist(err) {
+		t.Errorf("Shared deploy directory %s should still exist after cleanup", sharedDir)
+	}
+}
+
+func TestRunDoCleanupNoTargets(t *testing.T) {
+	configPath, artifactFile, assetFile := writeCleanupFixture(t)
+
+	output := captureCleanupOutput(t, configPath, "nosuchname", "", false, false)
+
+	if !strings.Contains(output, "No artifacts or assets found") {
+		t.Errorf("Expected output to report nothing matched, got: %s", output)
+	}
+	for _, file := range []string{artifactFile, assetFile} {
+		if _, err := os.Stat(file); os.IsNotExist(err) {
+			t.Errorf("File %s was removed despite no matching targets", file)
+		}
+	}
+}
+
+// TestRunDoCleanupArtifactRefusesProjectRoot covers the root guard on the
+// artifacts section, which previously was never reached.
+func TestRunDoCleanupArtifactRefusesProjectRoot(t *testing.T) {
+	tempDir := t.TempDir()
+
+	sentinel := filepath.Join(tempDir, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("do not delete me"), 0644); err != nil {
+		t.Fatalf("Failed to create sentinel file: %v", err)
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": {
+			"adapter": "Local",
+			"options": {
+				"root": "` + tempDir + `/repo"
+			}
+		},
+		"artifacts": [
+			{
+				"name": "rootapp",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "build",
+				"deploy_location": "",
+				"artifact_prefix": "rootapp"
+			}
+		]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	output := captureCleanupOutput(t, configPath, "", "", false, false)
+
+	if _, err := os.Stat(sentinel); os.IsNotExist(err) {
+		t.Errorf("Sentinel file %s was deleted; do-cleanup wiped the project root", sentinel)
+	}
+	if !strings.Contains(output, "Refusing to clean") {
+		t.Errorf("Expected output to indicate the artifact was refused, got: %s", output)
 	}
 }
