@@ -37,9 +37,10 @@ var validateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate artifacts.json and report common problems",
 	Long: `Validates the artifacts.json configuration and reports common problems such as
-duplicate names, missing directories, and empty deploy locations (which can wipe the
-project root). All problems are reported, and the command exits non-zero if any errors
-are found.`,
+duplicate names, missing directories, empty deploy locations (which can wipe the
+project root), and deploy locations that escape the project root with ".." (which
+do-cleanup refuses to clean, so files there are never removed). All problems are
+reported, and the command exits non-zero if any errors are found.`,
 	Run: runValidate,
 }
 
@@ -55,6 +56,16 @@ func runValidate(cmd *cobra.Command, args []string) {
 	if errCount > 0 {
 		os.Exit(1)
 	}
+}
+
+// deployLocationEscapesRoot reports whether a deploy_location resolves to a
+// directory outside the project root. filepath.Clean collapses interior ".."
+// elements first, so "public/../app" stays inside and is not flagged while
+// "../sibling" and "public/../../sibling" are. do-cleanup refuses to clean such
+// paths, which means stale files there accumulate silently.
+func deployLocationEscapesRoot(location string) bool {
+	cleaned := filepath.Clean(location)
+	return cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator))
 }
 
 // validateConfig inspects the configuration, writes any problems and a summary to w,
@@ -98,6 +109,11 @@ func validateConfig(w io.Writer, config *slarty.ArtifactsConfig) (errCount, warn
 			addError("%s has an empty deploy_location (this can wipe the project root)", label)
 		} else if artifact.DeployLocation == "." {
 			addWarning("%s has deploy_location \".\" which resolves to the project root", label)
+		} else if deployLocationEscapesRoot(artifact.DeployLocation) {
+			addError(
+				"%s has deploy_location %q which resolves outside the project root; do-cleanup refuses such paths, so files there are never cleaned",
+				label, artifact.DeployLocation,
+			)
 		}
 
 		if len(artifact.Directories) == 0 {
@@ -152,6 +168,11 @@ func validateConfig(w io.Writer, config *slarty.ArtifactsConfig) (errCount, warn
 			addError("%s has an empty deploy_location (this can wipe the project root)", label)
 		} else if asset.DeployLocation == "." {
 			addWarning("%s has deploy_location \".\" which resolves to the project root", label)
+		} else if deployLocationEscapesRoot(asset.DeployLocation) {
+			addError(
+				"%s has deploy_location %q which resolves outside the project root; do-cleanup refuses such paths, so files there are never cleaned",
+				label, asset.DeployLocation,
+			)
 		}
 	}
 

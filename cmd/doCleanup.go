@@ -58,11 +58,21 @@ only once.`,
 	Run: runDoCleanup,
 }
 
+// cleanupKind identifies which section of artifacts.json a cleanup target came
+// from. It is a named type so the two sections cannot be confused with an
+// arbitrary string literal.
+type cleanupKind string
+
+const (
+	kindArtifact cleanupKind = "artifact"
+	kindAsset    cleanupKind = "asset"
+)
+
 // cleanupTarget is a single deploy directory selected for cleaning, tagged with
 // the config section and entry name it came from so output can identify it.
 type cleanupTarget struct {
 	Name     string
-	Kind     string
+	Kind     cleanupKind
 	Location string
 }
 
@@ -107,7 +117,7 @@ func collectCleanupTargets(
 			if nameSelected(artifact.Name, filter, exclude) {
 				targets = append(targets, cleanupTarget{
 					Name:     artifact.Name,
-					Kind:     "artifact",
+					Kind:     kindArtifact,
 					Location: artifact.DeployLocation,
 				})
 			}
@@ -119,7 +129,7 @@ func collectCleanupTargets(
 			if nameSelected(asset.Name, filter, exclude) {
 				targets = append(targets, cleanupTarget{
 					Name:     asset.Name,
-					Kind:     "asset",
+					Kind:     kindAsset,
 					Location: asset.DeployLocation,
 				})
 			}
@@ -161,11 +171,10 @@ func runDoCleanup(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	rootAbs, err := filepath.Abs(artifactConfig.RootDirectory)
+	rootAbs, err := resolvePath(artifactConfig.RootDirectory)
 	if err != nil {
 		log.Fatalf("Failed to resolve root directory: %v", err)
 	}
-	rootAbs = filepath.Clean(rootAbs)
 
 	// Several entries may share a deploy_location. Track the paths already
 	// cleaned so the directory is emptied once rather than once per entry.
@@ -178,14 +187,13 @@ func runDoCleanup(cmd *cobra.Command, args []string) {
 		// Get the full path to the deploy location
 		deployPath := filepath.Join(artifactConfig.RootDirectory, target.Location)
 
-		deployAbs, err := filepath.Abs(deployPath)
+		deployAbs, err := resolvePath(deployPath)
 		if err != nil {
 			log.Fatalf("Failed to resolve deploy directory: %v", err)
 		}
-		deployAbs = filepath.Clean(deployAbs)
 
-		if isProjectRootOrAncestor(deployAbs, rootAbs) {
-			fmt.Printf(" - Refusing to clean %s: resolves to or contains the project root\n", deployPath)
+		if violation := deployPathViolation(deployAbs, rootAbs); violation != "" {
+			fmt.Printf(" - Refusing to clean %s: %s\n", deployPath, violation)
 			continue
 		}
 
@@ -213,22 +221,76 @@ func runDoCleanup(cmd *cobra.Command, args []string) {
 	}
 }
 
-// isProjectRootOrAncestor guards against cleaning the project root itself. An
-// empty or "." deploy_location causes filepath.Join to collapse to
-// RootDirectory, which would otherwise wipe the entire project. Both paths must
-// already be absolute and cleaned.
-func isProjectRootOrAncestor(deployAbs, rootAbs string) bool {
-	if deployAbs == rootAbs {
-		return true
-	}
-
-	// If rootAbs is inside deployAbs, then deployAbs is an ancestor of the root.
-	rel, err := filepath.Rel(deployAbs, rootAbs)
+// resolvePath returns path as an absolute, symlink-free location.
+//
+// filepath.Abs and filepath.Clean are both purely lexical, so on their own they
+// let a deploy_location that is (or traverses) a symlink pointing at the project
+// root slip past the containment check below, after which removeContents would
+// delete through the link. Symlinks are resolved on the deepest ancestor that
+// exists and the missing tail is appended back, so a deploy location that has
+// not been created yet still compares correctly against a root that itself
+// lives behind a symlink — /var on macOS being the common case.
+func resolvePath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
 	if err != nil {
-		return false
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+
+	remainder := ""
+	current := abs
+	for {
+		resolved, evalErr := filepath.EvalSymlinks(current)
+		if evalErr == nil {
+			return filepath.Join(resolved, remainder), nil
+		}
+		if !os.IsNotExist(evalErr) {
+			return "", evalErr
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			// Walked to the filesystem root without finding anything that
+			// exists; nothing can be resolved, so use the lexical form.
+			return abs, nil
+		}
+		remainder = filepath.Join(filepath.Base(current), remainder)
+		current = parent
+	}
+}
+
+// deployPathViolation reports why deployAbs must not be cleaned, or "" when it
+// is safe to clean.
+//
+// Cleaning is confined to directories strictly inside the project root.
+// deploy_location is documented as relative to root_directory, and
+// filepath.Join already collapses an absolute deploy_location back under the
+// root, so a path that escapes the root cannot be a deliberate deployment
+// target — it is a configuration mistake, and this command deletes files.
+// That rules out three cases: the root itself (an empty or "." deploy_location
+// collapses to it), any ancestor of the root, and any sibling reached with
+// "..". Both arguments must already be absolute, cleaned, and symlink-resolved.
+func deployPathViolation(deployAbs, rootAbs string) string {
+	if deployAbs == rootAbs {
+		return "resolves to the project root"
 	}
 
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+	rel, err := filepath.Rel(rootAbs, deployAbs)
+	if err != nil {
+		return "cannot be resolved relative to the project root"
+	}
+
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		// Separate an ancestor of the root from an unrelated directory, since
+		// the two mistakes have different causes and different fixes.
+		if inner, innerErr := filepath.Rel(deployAbs, rootAbs); innerErr == nil &&
+			inner != ".." && !strings.HasPrefix(inner, ".."+string(filepath.Separator)) && !filepath.IsAbs(inner) {
+			return "contains the project root"
+		}
+		return "resolves outside the project root"
+	}
+
+	return ""
 }
 
 // removeContents removes all files and directories within the specified directory

@@ -103,10 +103,10 @@ func TestCollectCleanupTargets(t *testing.T) {
 		}
 		// Artifacts come first, in config order, then assets.
 		expected := []cleanupTarget{
-			{Name: "app1", Kind: "artifact", Location: "public/app1"},
-			{Name: "app2", Kind: "artifact", Location: "public/app2"},
-			{Name: "asset1", Kind: "asset", Location: "deploy/asset1"},
-			{Name: "app1", Kind: "asset", Location: "deploy/app1"},
+			{Name: "app1", Kind: kindArtifact, Location: "public/app1"},
+			{Name: "app2", Kind: kindArtifact, Location: "public/app2"},
+			{Name: "asset1", Kind: kindAsset, Location: "deploy/asset1"},
+			{Name: "app1", Kind: kindAsset, Location: "deploy/app1"},
 		}
 		for i, want := range expected {
 			if targets[i] != want {
@@ -121,7 +121,7 @@ func TestCollectCleanupTargets(t *testing.T) {
 			t.Fatalf("Expected 2 targets, got %d", len(targets))
 		}
 		for _, target := range targets {
-			if target.Kind != "artifact" {
+			if target.Kind != kindArtifact {
 				t.Errorf("Expected only artifacts, got %+v", target)
 			}
 		}
@@ -133,7 +133,7 @@ func TestCollectCleanupTargets(t *testing.T) {
 			t.Fatalf("Expected 2 targets, got %d", len(targets))
 		}
 		for _, target := range targets {
-			if target.Kind != "asset" {
+			if target.Kind != kindAsset {
 				t.Errorf("Expected only assets, got %+v", target)
 			}
 		}
@@ -144,7 +144,7 @@ func TestCollectCleanupTargets(t *testing.T) {
 		if len(targets) != 2 {
 			t.Fatalf("Expected 2 targets for a name shared across sections, got %d", len(targets))
 		}
-		if targets[0].Kind != "artifact" || targets[1].Kind != "asset" {
+		if targets[0].Kind != kindArtifact || targets[1].Kind != kindAsset {
 			t.Errorf("Expected one artifact and one asset, got %+v", targets)
 		}
 	})
@@ -169,28 +169,94 @@ func TestCollectCleanupTargets(t *testing.T) {
 	})
 }
 
-func TestIsProjectRootOrAncestor(t *testing.T) {
-	root := filepath.Join(string(filepath.Separator), "srv", "app")
+func TestDeployPathViolation(t *testing.T) {
+	sep := string(filepath.Separator)
+	root := filepath.Join(sep, "srv", "app")
 
 	tests := []struct {
 		name      string
 		deployAbs string
-		expected  bool
+		expected  string
 	}{
-		{"same as root", root, true},
-		{"parent of root", filepath.Join(string(filepath.Separator), "srv"), true},
-		{"child of root", filepath.Join(root, "public", "build"), false},
-		{"sibling of root", filepath.Join(string(filepath.Separator), "srv", "other"), false},
+		{"same as root", root, "resolves to the project root"},
+		{"parent of root", filepath.Join(sep, "srv"), "contains the project root"},
+		{"filesystem root", sep, "contains the project root"},
+		{"sibling of root", filepath.Join(sep, "srv", "other"), "resolves outside the project root"},
+		{"unrelated absolute path", filepath.Join(sep, "var", "www"), "resolves outside the project root"},
+		{"child of root", filepath.Join(root, "public", "build"), ""},
+		{"immediate child of root", filepath.Join(root, "public"), ""},
+		// A directory whose name merely starts with the root's name is not
+		// inside it, so prefix-matching would wrongly allow this.
+		{"sibling sharing a name prefix", filepath.Join(sep, "srv", "app-staging"), "resolves outside the project root"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := isProjectRootOrAncestor(tc.deployAbs, root)
+			got := deployPathViolation(tc.deployAbs, root)
 			if got != tc.expected {
-				t.Errorf("isProjectRootOrAncestor(%q, %q) = %v, want %v", tc.deployAbs, root, got, tc.expected)
+				t.Errorf("deployPathViolation(%q, %q) = %q, want %q", tc.deployAbs, root, got, tc.expected)
 			}
 		})
 	}
+}
+
+func TestResolvePath(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// t.TempDir may itself sit behind a symlink (/var on macOS), so the
+	// resolved root is the baseline everything else is compared against.
+	realRoot, err := filepath.EvalSymlinks(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to resolve temp dir: %v", err)
+	}
+
+	t.Run("ResolvesExistingDirectory", func(t *testing.T) {
+		existing := filepath.Join(tempDir, "exists")
+		if err := os.MkdirAll(existing, 0755); err != nil {
+			t.Fatalf("Failed to create directory: %v", err)
+		}
+
+		got, err := resolvePath(existing)
+		if err != nil {
+			t.Fatalf("resolvePath returned an error: %v", err)
+		}
+		if want := filepath.Join(realRoot, "exists"); got != want {
+			t.Errorf("resolvePath(%q) = %q, want %q", existing, got, want)
+		}
+	})
+
+	// A deploy location that has not been created yet must still resolve
+	// against the real root, otherwise the containment check would reject it.
+	t.Run("ResolvesMissingTailAgainstRealRoot", func(t *testing.T) {
+		missing := filepath.Join(tempDir, "not", "created", "yet")
+
+		got, err := resolvePath(missing)
+		if err != nil {
+			t.Fatalf("resolvePath returned an error: %v", err)
+		}
+		if want := filepath.Join(realRoot, "not", "created", "yet"); got != want {
+			t.Errorf("resolvePath(%q) = %q, want %q", missing, got, want)
+		}
+	})
+
+	t.Run("ResolvesThroughSymlink", func(t *testing.T) {
+		target := filepath.Join(tempDir, "target")
+		if err := os.MkdirAll(target, 0755); err != nil {
+			t.Fatalf("Failed to create directory: %v", err)
+		}
+		link := filepath.Join(tempDir, "link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("Symlinks unavailable on this platform: %v", err)
+		}
+
+		got, err := resolvePath(link)
+		if err != nil {
+			t.Fatalf("resolvePath returned an error: %v", err)
+		}
+		if want := filepath.Join(realRoot, "target"); got != want {
+			t.Errorf("resolvePath(%q) = %q, want %q", link, got, want)
+		}
+	})
 }
 
 func TestRemoveContents(t *testing.T) {
@@ -865,5 +931,360 @@ func TestRunDoCleanupArtifactRefusesProjectRoot(t *testing.T) {
 	}
 	if !strings.Contains(output, "Refusing to clean") {
 		t.Errorf("Expected output to indicate the artifact was refused, got: %s", output)
+	}
+}
+
+// resetFlag restores a do-cleanup flag to value and clears its Changed marker,
+// which pflag sets on every Set call and cobra's flag-group validation reads.
+func resetFlag(t *testing.T, name, value string) {
+	t.Helper()
+
+	f := doCleanupCmd.Flags().Lookup(name)
+	if f == nil {
+		t.Fatalf("do-cleanup has no %q flag to reset", name)
+	}
+	if err := f.Value.Set(value); err != nil {
+		t.Fatalf("Failed to reset flag %q: %v", name, err)
+	}
+	f.Changed = false
+}
+
+// executeDoCleanup runs the command through cobra rather than calling
+// runDoCleanup directly, so flag parsing and flag-group validation actually
+// happen. Calling runDoCleanup bypasses both.
+func executeDoCleanup(t *testing.T, args ...string) error {
+	t.Helper()
+
+	oldArtifactsJson := artifactsJson
+	oldFilter, oldExclude := filter, exclude
+	restoreSections := stubSectionFlags(false, false)
+
+	oldOut, oldErr := rootCmd.OutOrStdout(), rootCmd.ErrOrStderr()
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	t.Cleanup(func() {
+		os.Stdout = oldStdout
+		rootCmd.SetOut(oldOut)
+		rootCmd.SetErr(oldErr)
+		rootCmd.SetArgs(nil)
+		artifactsJson = oldArtifactsJson
+		filter, exclude = oldFilter, oldExclude
+		restoreSections()
+		// Clear the parsed flag state so later runs start from a clean slate.
+		// Resetting the value is not enough: pflag marks a flag Changed on Set,
+		// and cobra's mutual-exclusion check reads Changed, not the value.
+		resetFlag(t, "artifacts-only", "false")
+		resetFlag(t, "assets-only", "false")
+		resetFlag(t, "filter", "")
+		resetFlag(t, "exclude", "")
+	})
+
+	rootCmd.SetOut(io.Discard)
+	rootCmd.SetErr(io.Discard)
+	rootCmd.SetArgs(append([]string{"do-cleanup"}, args...))
+
+	err := rootCmd.Execute()
+
+	w.Close()
+	os.Stdout = oldStdout
+	io.Copy(io.Discard, r)
+
+	return err
+}
+
+// TestDoCleanupSectionFlagsMutuallyExclusive exercises the
+// MarkFlagsMutuallyExclusive registration through cobra. The other tests set
+// the package globals directly, which skips flag validation entirely, so
+// without this the registration could be deleted and nothing would fail.
+func TestDoCleanupSectionFlagsMutuallyExclusive(t *testing.T) {
+	configPath, _, _ := writeCleanupFixture(t)
+
+	t.Run("BothFlagsRejected", func(t *testing.T) {
+		err := executeDoCleanup(t, "-a", configPath, "--artifacts-only", "--assets-only")
+		if err == nil {
+			t.Fatal("Expected an error when both --artifacts-only and --assets-only are set, got nil")
+		}
+		if !strings.Contains(err.Error(), "artifacts-only") || !strings.Contains(err.Error(), "assets-only") {
+			t.Errorf("Expected the error to name both flags, got: %v", err)
+		}
+	})
+
+	// Positive control: proves the error above comes from the flag group and
+	// not from something incidental like an unreadable config.
+	t.Run("SingleFlagAccepted", func(t *testing.T) {
+		if err := executeDoCleanup(t, "-a", configPath, "--artifacts-only"); err != nil {
+			t.Errorf("Expected --artifacts-only alone to be accepted, got: %v", err)
+		}
+	})
+
+	t.Run("NeitherFlagAccepted", func(t *testing.T) {
+		if err := executeDoCleanup(t, "-a", configPath); err != nil {
+			t.Errorf("Expected no section flags to be accepted, got: %v", err)
+		}
+	})
+}
+
+// TestRunDoCleanupRefusesSymlinkToProjectRoot covers the hole that filepath.Abs
+// and filepath.Clean leave open: both are purely lexical, so a deploy_location
+// that is a symlink pointing at the project root passes a lexical containment
+// check, and removeContents then deletes through the link.
+func TestRunDoCleanupRefusesSymlinkToProjectRoot(t *testing.T) {
+	tempDir := t.TempDir()
+
+	sentinel := filepath.Join(tempDir, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("do not delete me"), 0644); err != nil {
+		t.Fatalf("Failed to create sentinel file: %v", err)
+	}
+
+	// deploy/root is a symlink back to the project root.
+	if err := os.MkdirAll(filepath.Join(tempDir, "deploy"), 0755); err != nil {
+		t.Fatalf("Failed to create deploy directory: %v", err)
+	}
+	link := filepath.Join(tempDir, "deploy", "root")
+	if err := os.Symlink(tempDir, link); err != nil {
+		t.Skipf("Symlinks unavailable on this platform: %v", err)
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": {
+			"adapter": "Local",
+			"options": {
+				"root": "` + tempDir + `/repo"
+			}
+		},
+		"artifacts": [
+			{
+				"name": "sneaky",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "build",
+				"deploy_location": "deploy/root",
+				"artifact_prefix": "sneaky"
+			}
+		]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	output := captureCleanupOutput(t, configPath, "", "", false, false)
+
+	if _, err := os.Stat(sentinel); os.IsNotExist(err) {
+		t.Errorf("Sentinel file %s was deleted through the symlink; the root guard was bypassed", sentinel)
+	}
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Errorf("Config file %s was deleted through the symlink; the root guard was bypassed", configPath)
+	}
+	if !strings.Contains(output, "Refusing to clean") {
+		t.Errorf("Expected output to indicate the symlinked location was refused, got: %s", output)
+	}
+	if !strings.Contains(output, "resolves to the project root") {
+		t.Errorf("Expected the refusal to name the project root, got: %s", output)
+	}
+}
+
+// TestRunDoCleanupRefusesSiblingOfRoot covers a deploy_location that escapes the
+// project root with "..". deploy_location is documented as relative to
+// root_directory, so this is a configuration mistake rather than a deliberate
+// target, and this command deletes files.
+func TestRunDoCleanupRefusesSiblingOfRoot(t *testing.T) {
+	base := t.TempDir()
+
+	root := filepath.Join(base, "project")
+	sibling := filepath.Join(base, "sibling")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatalf("Failed to create project root: %v", err)
+	}
+	if err := os.MkdirAll(sibling, 0755); err != nil {
+		t.Fatalf("Failed to create sibling directory: %v", err)
+	}
+
+	sentinel := filepath.Join(sibling, "keep.txt")
+	if err := os.WriteFile(sentinel, []byte("outside the project"), 0644); err != nil {
+		t.Fatalf("Failed to create sentinel file: %v", err)
+	}
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + root + `",
+		"repository": {
+			"adapter": "Local",
+			"options": {
+				"root": "` + root + `/repo"
+			}
+		},
+		"artifacts": [
+			{
+				"name": "escapes",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "build",
+				"deploy_location": "../sibling",
+				"artifact_prefix": "escapes"
+			}
+		]
+	}`
+
+	configPath := filepath.Join(root, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	output := captureCleanupOutput(t, configPath, "", "", false, false)
+
+	if _, err := os.Stat(sentinel); os.IsNotExist(err) {
+		t.Errorf("Sentinel file %s outside the project root was deleted", sentinel)
+	}
+	if !strings.Contains(output, "resolves outside the project root") {
+		t.Errorf("Expected the refusal to say the path escapes the root, got: %s", output)
+	}
+}
+
+// TestRunDoCleanupSectionFlagWithFilter covers a section flag combined with
+// --filter and --exclude at the runDoCleanup level; the interaction is
+// otherwise only tested against collectCleanupTargets.
+func TestRunDoCleanupSectionFlagWithFilter(t *testing.T) {
+	tempDir := t.TempDir()
+
+	dirs := map[string]string{
+		"app1":   filepath.Join(tempDir, "public", "app1"),
+		"app2":   filepath.Join(tempDir, "public", "app2"),
+		"shared": filepath.Join(tempDir, "deploy", "shared"),
+	}
+	files := make(map[string]string, len(dirs))
+	for name, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("Failed to create directory %s: %v", dir, err)
+		}
+		file := filepath.Join(dir, "stale.txt")
+		if err := os.WriteFile(file, []byte("stale"), 0644); err != nil {
+			t.Fatalf("Failed to create file %s: %v", file, err)
+		}
+		files[name] = file
+	}
+
+	// "shared" names an asset as well as artifact app2, so the section flag is
+	// what keeps the asset out of the selection.
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": {
+			"adapter": "Local",
+			"options": {
+				"root": "` + tempDir + `/repo"
+			}
+		},
+		"artifacts": [
+			{
+				"name": "app1",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "public/app1",
+				"deploy_location": "public/app1",
+				"artifact_prefix": "app1"
+			},
+			{
+				"name": "app2",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "public/app2",
+				"deploy_location": "public/app2",
+				"artifact_prefix": "app2"
+			}
+		],
+		"assets": [
+			{
+				"name": "app1",
+				"filename": "shared.tar.gz",
+				"deploy_location": "deploy/shared"
+			}
+		]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	t.Run("ArtifactsOnlyWithFilter", func(t *testing.T) {
+		output := captureCleanupOutput(t, configPath, "app1", "", true, false)
+
+		if !strings.Contains(output, "artifact app1") {
+			t.Errorf("Expected artifact app1 to be cleaned, got: %s", output)
+		}
+		if strings.Contains(output, "asset app1") {
+			t.Errorf("Expected --artifacts-only to exclude the asset sharing the name, got: %s", output)
+		}
+		if _, err := os.Stat(files["app1"]); !os.IsNotExist(err) {
+			t.Errorf("Artifact app1 file survived cleanup")
+		}
+		if _, err := os.Stat(files["shared"]); os.IsNotExist(err) {
+			t.Errorf("Asset file was removed despite --artifacts-only")
+		}
+		if _, err := os.Stat(files["app2"]); os.IsNotExist(err) {
+			t.Errorf("Artifact app2 file was removed despite --filter app1")
+		}
+	})
+
+	t.Run("ArtifactsOnlyWithExclude", func(t *testing.T) {
+		output := captureCleanupOutput(t, configPath, "", "app1", true, false)
+
+		if !strings.Contains(output, "artifact app2") {
+			t.Errorf("Expected artifact app2 to be cleaned, got: %s", output)
+		}
+		if strings.Contains(output, "artifact app1") {
+			t.Errorf("Expected artifact app1 to be excluded, got: %s", output)
+		}
+		if _, err := os.Stat(files["app2"]); !os.IsNotExist(err) {
+			t.Errorf("Artifact app2 file survived cleanup")
+		}
+	})
+}
+
+// TestRunDoCleanupMissingDirectory covers the branch where a configured
+// deploy_location has not been created yet, which is legitimate.
+func TestRunDoCleanupMissingDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+
+	jsonContent := `{
+		"application": "Test App",
+		"root_directory": "` + tempDir + `",
+		"repository": {
+			"adapter": "Local",
+			"options": {
+				"root": "` + tempDir + `/repo"
+			}
+		},
+		"artifacts": [
+			{
+				"name": "neverdeployed",
+				"directories": ["src"],
+				"command": "true",
+				"output_directory": "build",
+				"deploy_location": "public/never",
+				"artifact_prefix": "neverdeployed"
+			}
+		]
+	}`
+
+	configPath := filepath.Join(tempDir, "artifacts.json")
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config file: %v", err)
+	}
+
+	output := captureCleanupOutput(t, configPath, "", "", false, false)
+
+	if !strings.Contains(output, "Directory does not exist") {
+		t.Errorf("Expected output to report the missing directory, got: %s", output)
+	}
+	// A missing deploy location must not be mistaken for an escape attempt.
+	if strings.Contains(output, "Refusing to clean") {
+		t.Errorf("A deploy location that does not exist yet must not be refused, got: %s", output)
 	}
 }

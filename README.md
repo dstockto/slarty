@@ -280,7 +280,15 @@ You can pass in the `--filter` flag to limit cleanup to only the entries whose n
 
 A `deploy_location` shared by more than one entry is cleaned only once, so artifacts that deploy into the same directory do not wipe each other. The contents of each directory are removed, but the directory itself is left in place.
 
-As a safety measure, `do-cleanup` refuses to clean a `deploy_location` that resolves to the project root or to a directory containing it — which is what an empty or `"."` `deploy_location` would otherwise do. Such entries are reported and skipped. Use `slarty validate` to catch these in advance.
+As a safety measure, `do-cleanup` only cleans directories that resolve to a location strictly **inside** `root_directory`. It reports and skips any entry whose `deploy_location`:
+
+* resolves to the project root itself, which is what an empty or `"."` `deploy_location` does;
+* resolves to a directory *containing* the project root;
+* escapes the root with `..`, such as `"../sibling"`.
+
+Symlinks are resolved before this check, so a `deploy_location` that points at the project root through a link is refused rather than deleted through.
+
+Note that `deploy_location` is always relative to `root_directory` and an absolute path is folded back underneath it, so deploying outside the project root is not supported. Run `slarty validate` to catch these configurations before a deployment relies on them.
 
 > **Note:** in the original PHP implementation, `do-cleanup` cleaned only the `artifacts` section. Versions of this Go port before the fix for issue #39 cleaned only the `assets` section, which meant stale files in artifact deploy locations were never removed. It now cleans both.
 
